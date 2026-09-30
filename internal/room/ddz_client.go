@@ -227,7 +227,11 @@ func (r *ddzRoom) handleClientEnv(env protocol.Envelope) {
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
 			return
 		}
-		r.logf("被拒绝: %s", p.Message)
+		msg := p.Message
+		if r.pendingKind == "play" {
+			msg += "（写法: play 55 / play 34567 / play #3 #7）"
+		}
+		r.logf("被拒绝: %s", msg)
 	}
 	r.render()
 }
@@ -239,8 +243,11 @@ func (r *ddzRoom) handleClientLocal(line string, conn *netx.Conn, name string) (
 		return false
 
 	case "help":
-		r.logf("命令: play 1 2 / play 1-3 | bid 0-3 | pass | next | chat TEXT | leave")
+		r.logf("命令: play 55 / play 34567（按牌面）| play #3 #7（按编号）| bid 0-3 | pass | hint | next | chat TEXT | leave")
 		r.render()
+
+	case "hint":
+		r.showHints()
 
 	case "ready":
 		if env, err := protocol.NewEnvelope(protocol.TypeDdzReady, name, nil); err == nil {
@@ -279,6 +286,7 @@ func (r *ddzRoom) handleClientLocal(line string, conn *netx.Conn, name string) (
 		if err != nil {
 			return false
 		}
+		r.pendingKind = cmd.kind
 		if err := conn.Send(env); err != nil {
 			r.logf("发送失败: %s", err.Error())
 			r.render()

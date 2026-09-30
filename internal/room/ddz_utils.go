@@ -49,9 +49,11 @@ type ddzRoom struct {
 	reveal     [ddz.Seats][]ddz.Card
 	revealSent bool
 	started    bool
-	log        []string
-	app        ddzUI
-	rng        *rand.Rand
+	// pendingKind 记住最近一次上行命令的类型，被房主拒绝时好补一句用法提示。
+	pendingKind string
+	log         []string
+	app         ddzUI
+	rng         *rand.Rand
 }
 
 func newDdzRoom(name string, base, rounds int) *ddzRoom {
@@ -306,12 +308,70 @@ func (r *ddzRoom) relayChat(from int, msg string) {
 	}
 }
 
+// --- 提示与报错 ---
+
+// maxHintShown 一条提示里最多列几种出法，超出的只报数量。
+const maxHintShown = 6
+
+// showHints 用"自己的手牌 + 公开的上一手牌"算出所有能压过去的出法并写进日志。
+// 房主和客户端都在本地算：客户端手里只有自己的牌，算出来的东西不涉及别人的隐私，
+// 也不需要多一次网络往返。给出的写法可以直接复制成下一条命令。
+func (r *ddzRoom) showHints() {
+	if !r.started || len(r.hand) == 0 {
+		r.logf("提示: 对局还没开始")
+		r.render()
+		return
+	}
+	var target *ddz.Combo
+	if last := r.view.LastPlay; last != nil {
+		combo := last.AsCombo()
+		target = &combo
+	}
+
+	hints := ddz.Hints(r.hand, target)
+	if len(hints) == 0 {
+		if target == nil {
+			r.logf("提示: 手里没有能出的牌")
+		} else {
+			r.logf("提示: 没有能压过%s的牌，只能 pass", r.view.LastPlay.Label)
+		}
+		r.render()
+		return
+	}
+
+	parts := make([]string, 0, maxHintShown+1)
+	for i, h := range hints {
+		if i == maxHintShown {
+			parts = append(parts, fmt.Sprintf("…还有 %d 种", len(hints)-maxHintShown))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s play %s", h.Combo, h.Notation()))
+	}
+	if target == nil {
+		r.logf("可以出（后面的写法直接可用）: %s", strings.Join(parts, " | "))
+	} else {
+		r.logf("可以压过%s: %s", r.view.LastPlay.Label, strings.Join(parts, " | "))
+	}
+	r.render()
+}
+
+// rejectHint 统一处理被拒绝的操作：出牌失败时顺带提醒两套写法，免得卡在编号/点数上。
+func (r *ddzRoom) rejectHint(err error, cmd ddzCmd) {
+	msg := err.Error()
+	if cmd.kind == "play" {
+		msg += "（写法: play 55 / play 34567 / play #3 #7）"
+	}
+	r.logf("操作被拒: %s", msg)
+	r.render()
+}
+
 // --- 命令解析 ---
 
 type ddzCmd struct {
-	kind string // play / bid / pass / start / next / ready / chat / leave / help / bad / none
-	nums []int
-	text string
+	kind  string     // play / bid / pass / start / next / ready / chat / hint / leave / help / bad / none
+	nums  []int      // 手牌编号（play #3 #7 形式）
+	ranks []ddz.Rank // 牌面点数（play 55 / play 34567 形式）
+	text  string
 }
 
 func parseDdzCmd(line string) ddzCmd {
@@ -329,6 +389,8 @@ func parseDdzCmd(line string) ddzCmd {
 		return ddzCmd{kind: "ready"}
 	case lower == "pass" || line == "不要" || line == "过":
 		return ddzCmd{kind: "pass"}
+	case lower == "hint" || lower == "提示" || lower == "有什":
+		return ddzCmd{kind: "hint"}
 	case lower == "help" || line == "帮助" || line == "?":
 		return ddzCmd{kind: "help"}
 	case lower == "leave" || lower == "quit" || lower == "exit":
@@ -341,11 +403,7 @@ func parseDdzCmd(line string) ddzCmd {
 
 	switch head {
 	case "play", "出", "出牌":
-		nums, err := parseIndexList(fields[1:])
-		if err != nil {
-			return ddzCmd{kind: "bad", text: err.Error()}
-		}
-		return ddzCmd{kind: "play", nums: nums}
+		return parsePlayArgs(fields[1:])
 	case "bid", "叫", "叫分":
 		if len(fields) != 2 {
 			return ddzCmd{kind: "bad", text: "用法: bid 0 / bid 1 / bid 2 / bid 3"}
@@ -364,14 +422,48 @@ func parseDdzCmd(line string) ddzCmd {
 	return ddzCmd{kind: "bad", text: "无法识别的命令，输入 help 查看用法"}
 }
 
-// parseIndexList 支持 "1 2 5" 与 "1-3" 两种写法。
-func parseIndexList(fields []string) ([]int, error) {
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("用法: play 1 2 5 或 play 1-3")
+// parsePlayArgs 解析出牌参数。两套写法：
+//
+//	带 # 前缀 → 手牌编号：play #3 #7 / play #3-#7
+//	否则      → 牌面点数：play 55 / play 34567 / play wW / play T J Q K A
+//
+// 两种写法不能混用，免得"3 到底是编号还是点数"说不清。
+func parsePlayArgs(args []string) ddzCmd {
+	if len(args) == 0 {
+		return ddzCmd{kind: "bad", text: playUsage}
 	}
+	useIndex := false
+	for _, a := range args {
+		if strings.HasPrefix(a, "#") {
+			useIndex = true
+			break
+		}
+	}
+	if useIndex {
+		nums, err := parseIndexList(args)
+		if err != nil {
+			return ddzCmd{kind: "bad", text: err.Error()}
+		}
+		return ddzCmd{kind: "play", nums: nums}
+	}
+	ranks, err := ddz.ParseRanks(strings.Join(args, " "))
+	if err != nil {
+		return ddzCmd{kind: "bad", text: err.Error()}
+	}
+	return ddzCmd{kind: "play", ranks: ranks}
+}
+
+const playUsage = "用法: play 55（按牌面，如 34567 / wW / T J Q K A）或 play #3 #7（按手牌编号）"
+
+// parseIndexList 只接受带 # 的编号写法："#3 #7" 与 "#3-#7"。
+func parseIndexList(fields []string) ([]int, error) {
 	nums := make([]int, 0, len(fields))
 	for _, f := range fields {
-		parts := strings.Split(f, "-")
+		if !strings.HasPrefix(f, "#") {
+			return nil, fmt.Errorf("%q 缺少 # 前缀；编号写法要写成 play #3 #7，牌面写法直接写点数如 play 55", f)
+		}
+		body := strings.TrimPrefix(f, "#")
+		parts := strings.Split(body, "-")
 		if len(parts) == 1 {
 			n, err := strconv.Atoi(parts[0])
 			if err != nil {
@@ -383,8 +475,9 @@ func parseIndexList(fields []string) ([]int, error) {
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("区间 %q 格式不对", f)
 		}
-		lo, err1 := strconv.Atoi(parts[0])
-		hi, err2 := strconv.Atoi(parts[1])
+		// 区间两端都允许再写一次 #，即 "#1-#3" 与 "#1-3" 等价
+		lo, err1 := strconv.Atoi(strings.TrimPrefix(parts[0], "#"))
+		hi, err2 := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
 		if err1 != nil || err2 != nil || hi < lo {
 			return nil, fmt.Errorf("区间 %q 格式不对", f)
 		}
@@ -394,6 +487,9 @@ func parseIndexList(fields []string) ([]int, error) {
 		for n := lo; n <= hi; n++ {
 			nums = append(nums, n)
 		}
+	}
+	if len(nums) == 0 {
+		return nil, fmt.Errorf("%s", playUsage)
 	}
 	return nums, nil
 }
@@ -421,7 +517,8 @@ func rankText(scores []int) string {
 	return fmt.Sprintf("%s 第一（%d 分）", leaders[0], best)
 }
 
-// actionFromCmd 把界面上的手牌编号翻译成 cardID 动作。编号以最近一次下发的手牌为准。
+// actionFromCmd 把手牌编号或牌面点数翻译成 cardID 动作。
+// 两套写法都以最近一次下发的手牌为准。
 func actionFromCmd(cmd ddzCmd, hand []ddz.Card) (ddz.Action, error) {
 	switch cmd.kind {
 	case "pass":
@@ -432,6 +529,13 @@ func actionFromCmd(cmd ddzCmd, hand []ddz.Card) (ddz.Action, error) {
 		}
 		return ddz.Action{Kind: ddz.ActBid, Bid: cmd.nums[0]}, nil
 	case "play":
+		if len(cmd.ranks) > 0 {
+			ids, err := handRanksToIDs(hand, cmd.ranks)
+			if err != nil {
+				return ddz.Action{}, err
+			}
+			return ddz.Action{Kind: ddz.ActPlay, Cards: ids}, nil
+		}
 		ids, err := handIndicesToIDs(hand, cmd.nums)
 		if err != nil {
 			return ddz.Action{}, err
@@ -439,6 +543,40 @@ func actionFromCmd(cmd ddzCmd, hand []ddz.Card) (ddz.Action, error) {
 		return ddz.Action{Kind: ddz.ActPlay, Cards: ids}, nil
 	}
 	return ddz.Action{}, fmt.Errorf("无法识别的动作")
+}
+
+// handRanksToIDs 按点数从手里挑牌。斗地主不看花色，同点数的牌挑哪几张都一样。
+func handRanksToIDs(hand []ddz.Card, ranks []ddz.Rank) ([]int, error) {
+	if len(hand) == 0 {
+		return nil, fmt.Errorf("手牌为空")
+	}
+	need := make(map[ddz.Rank]int, len(ranks))
+	for _, r := range ranks {
+		need[r]++
+	}
+	used := make(map[int]bool, len(ranks))
+	ids := make([]int, 0, len(ranks))
+	for _, r := range ranks {
+		picked := false
+		for _, c := range hand {
+			if c.Rank == r && !used[c.ID] {
+				used[c.ID] = true
+				ids = append(ids, c.ID)
+				picked = true
+				break
+			}
+		}
+		if !picked {
+			have := 0
+			for _, c := range hand {
+				if c.Rank == r {
+					have++
+				}
+			}
+			return nil, fmt.Errorf("你手里只有 %d 张 %s，出不了 %d 张", have, r.Label(), need[r])
+		}
+	}
+	return ids, nil
 }
 
 func handIndicesToIDs(hand []ddz.Card, nums []int) ([]int, error) {

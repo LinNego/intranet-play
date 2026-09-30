@@ -232,8 +232,11 @@ func (r *ddzRoom) handleHostLocal(line string) (done bool) {
 		return false
 
 	case "help":
-		r.logf("命令: play 1 2 / play 1-3 | bid 0-3 | pass | start | next | chat TEXT | leave")
+		r.logf("命令: play 55 / play 34567（按牌面）| play #3 #7（按编号）| bid 0-3 | pass | hint | start | next | chat TEXT | leave")
 		r.render()
+
+	case "hint":
+		r.showHints()
 
 	case "start":
 		if r.started {
@@ -268,8 +271,7 @@ func (r *ddzRoom) handleHostLocal(line string) (done bool) {
 			return false
 		}
 		if err := r.applyAction(r.you, act); err != nil {
-			r.logf("操作被拒: %s", err.Error())
-			r.render()
+			r.rejectHint(err, cmd)
 		}
 
 	case "chat":

@@ -85,24 +85,27 @@ func TestDdzViewRendersHandWithStableNumbering(t *testing.T) {
 		}
 	}
 
-	// 手牌编号必须从 1 连续到张数，且每张牌都能在界面上找到
+	// 手牌编号必须从 #1 连续到张数（带 # 前缀，和 play 55 这种牌面写法区分开）
 	for i := 1; i <= len(f.Hand); i++ {
-		if !strings.Contains(out, fmt.Sprintf("%d:", i)) {
-			t.Fatalf("手牌编号 %d 没有出现在界面上\n%s", i, out)
+		if !strings.Contains(out, fmt.Sprintf("#%d:", i)) {
+			t.Fatalf("手牌编号 #%d 没有出现在界面上\n%s", i, out)
 		}
 	}
-	if strings.Contains(out, fmt.Sprintf("%d:", len(f.Hand)+1)) {
+	if strings.Contains(out, fmt.Sprintf("#%d:", len(f.Hand)+1)) {
 		t.Fatalf("手牌编号超出张数\n%s", out)
 	}
 	// 18 张牌按每行 6 张排布 → 3 行
 	rows := 0
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "1:") || strings.Contains(line, "7:") || strings.Contains(line, "13:") {
+		if strings.Contains(line, "#1:") || strings.Contains(line, "#7:") || strings.Contains(line, "#13:") {
 			rows++
 		}
 	}
 	if rows != 3 {
 		t.Fatalf("手牌应当分 3 行显示，实际 %d 行\n%s", rows, out)
+	}
+	if !strings.Contains(out, "hint") {
+		t.Fatalf("帮助行里应当提示 hint 命令\n%s", out)
 	}
 }
 
