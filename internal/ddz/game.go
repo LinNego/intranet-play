@@ -254,7 +254,8 @@ func (g *Game) applyPlay(seat int, act Action) ([]Event, error) {
 			g.Multiplier *= 2
 		}
 
-		events := []Event{{Seat: seat, Text: fmt.Sprintf("打出 %s", combo)}}
+		// 日志里带上点数写法，玩家可以直接照抄出同样的牌型
+		events := []Event{{Seat: seat, Text: fmt.Sprintf("打出 %s %s", combo, Notation(cards))}}
 		if len(g.Hands[seat]) == 0 {
 			events = append(events, g.finish(seat)...)
 			return events, nil
@@ -377,7 +378,13 @@ type PlayView struct {
 	Kind  ComboKind `json:"kind"`
 	Main  Rank      `json:"main"`
 	Size  int       `json:"size"`
+	Chain int       `json:"chain"`
 	Label string    `json:"label"`
+}
+
+// AsCombo 把公开视图还原成牌型，便于客户端本地算提示（提示只看 Kind/Main/Size）。
+func (p PlayView) AsCombo() Combo {
+	return Combo{Kind: p.Kind, Main: p.Main, Size: p.Size, Chain: p.Chain}
 }
 
 // PublicView 广播给所有人。这里只有手牌张数，绝不包含任何手牌内容。
@@ -449,6 +456,7 @@ func (g *Game) PublicView() PublicView {
 			Kind:  g.LastPlay.Combo.Kind,
 			Main:  g.LastPlay.Combo.Main,
 			Size:  g.LastPlay.Combo.Size,
+			Chain: g.LastPlay.Combo.Chain,
 			Label: g.LastPlay.Combo.String(),
 		}
 	}

@@ -21,6 +21,9 @@ type botUI struct {
 	done chan struct{}
 	once sync.Once
 
+	// rankNotation 决定这个机器人用哪套出牌写法，用来同时覆盖两套语法。
+	rankNotation bool
+
 	mu      sync.Mutex
 	lastKey string
 	frames  int
@@ -47,7 +50,7 @@ func (b *botUI) UpdateFrame(f ui.DdzFrame) {
 	if key == b.lastKey {
 		return
 	}
-	line := decideAction(b.seat, f)
+	line := decideAction(b.seat, f, b.rankNotation)
 	if line == "" {
 		return
 	}
@@ -85,7 +88,9 @@ func frameKey(f ui.DdzFrame) string {
 }
 
 // decideAction 是三个座位共用的"只会出单张"的笨策略，足够把一局打完。
-func decideAction(seat int, f ui.DdzFrame) string {
+// rankNotation 为 true 时用牌面写法（play 5 / play T / play W），
+// 为 false 时用编号写法（play #3）——这样端到端测试能把两套出牌语法都跑到。
+func decideAction(seat int, f ui.DdzFrame, rankNotation bool) string {
 	if !f.Started {
 		if seat == 0 && allSeatsNamed(f) {
 			return "start"
@@ -102,18 +107,25 @@ func decideAction(seat int, f ui.DdzFrame) string {
 		if len(f.Hand) == 0 {
 			return ""
 		}
-		if f.LastPlay == nil {
-			// 手牌降序，最后一张就是最小单张
-			return fmt.Sprintf("play %d", len(f.Hand))
-		}
-		if f.LastPlay.Kind == ddz.KindSingle {
+		idx := -1
+		switch {
+		case f.LastPlay == nil:
+			idx = len(f.Hand) - 1 // 手牌降序，最后一张就是最小单张
+		case f.LastPlay.Kind == ddz.KindSingle:
 			for i := len(f.Hand) - 1; i >= 0; i-- {
 				if f.Hand[i].Rank > f.LastPlay.Main {
-					return fmt.Sprintf("play %d", i+1)
+					idx = i
+					break
 				}
 			}
 		}
-		return "pass"
+		if idx < 0 {
+			return "pass"
+		}
+		if rankNotation {
+			return "play " + ddz.Notation([]ddz.Card{f.Hand[idx]})
+		}
+		return fmt.Sprintf("play #%d", idx+1)
 	case ddz.PhaseRoundEnd:
 		return "next"
 	}
@@ -290,7 +302,7 @@ func (a *auditor) act(conn *netx.Conn, name string) {
 	if key == a.lastKey {
 		return
 	}
-	line := decideAction(a.seat, f)
+	line := decideAction(a.seat, f, false)
 	if line == "" {
 		return
 	}
@@ -362,12 +374,16 @@ func TestDdzThreePlayerEndToEnd(t *testing.T) {
 	addr := ln.Addr().String()
 
 	host := newDdzHostRoom("9988", "Host", 1, 1) // 只打 1 局，打完直接整场结算
+	// 房主与客户端 A 用新出的"按牌面"写法，裸协议审计端用"按编号"写法，
+	// 这样端到端跑一遍就能同时覆盖两套出牌语法。
 	hostBot := newBotUI(0)
+	hostBot.rankNotation = true
 	host.app = hostBot
 	go func() { _ = host.serveHost(ln) }()
 	defer hostBot.Quit()
 
 	botA := newBotUI(0)
+	botA.rankNotation = true
 	connA := startTestClient(t, addr, "Alice", botA)
 	defer connA.Close()
 	defer botA.Quit()
@@ -540,7 +556,7 @@ func TestDdzFourthPlayerRejected(t *testing.T) {
 	addr := ln.Addr().String()
 
 	host := newDdzHostRoom("9988", "Host", 1, 1)
-	hostBot := newBotUI(0)
+	hostBot := newBotUI(0) // 三人到齐后自动 start
 	host.app = hostBot
 	go func() { _ = host.serveHost(ln) }()
 	defer hostBot.Quit()

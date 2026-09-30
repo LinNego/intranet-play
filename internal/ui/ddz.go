@@ -205,7 +205,7 @@ func (m *ddzModel) View() string {
 	}
 	b.WriteString(statusStyle.Render("state: " + ddzStatusText(f)))
 	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("cmd: play 1 2 | bid 0-3 | pass | chat TEXT | help | leave"))
+	b.WriteString(helpStyle.Render("cmd: play 55 | play 34567 | play #1 #2 | bid 0-3 | pass | hint | chat | leave"))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, ddzMaxLogLines) {
 		b.WriteString(ddzLogStyle.Render("log: " + line))
@@ -430,14 +430,15 @@ func ddzCardText(c ddz.Card) string {
 	}
 }
 
-// ddzCardCell 渲染带编号的手牌格子：编号 4 列 + 牌面 + 补白 = 固定 8 列。
+// ddzCardCell 渲染带编号的手牌格子：编号 5 列（含 #）+ 牌面 + 补白 = 固定 9 列。
+// 编号带 # 前缀是为了和"按牌面出牌"的写法区分开：play #3 是编号，play 55 是牌面。
 func ddzCardCell(num int, c ddz.Card) string {
-	prefix := "    "
+	prefix := "     "
 	if num > 0 {
-		prefix = padLeft(fmt.Sprintf("%d:", num), 4)
+		prefix = padLeft(fmt.Sprintf("#%d:", num), 5)
 	}
 	label := c.Label()
-	pad := 8 - runewidth.StringWidth(prefix) - runewidth.StringWidth(label)
+	pad := 9 - runewidth.StringWidth(prefix) - runewidth.StringWidth(label)
 	if pad < 1 {
 		pad = 1
 	}

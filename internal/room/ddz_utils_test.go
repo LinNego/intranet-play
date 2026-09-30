@@ -1,6 +1,7 @@
 package room
 
 import (
+	"strings"
 	"testing"
 
 	"intranet-play/internal/ddz"
@@ -8,16 +9,28 @@ import (
 
 func TestParseDdzCmd(t *testing.T) {
 	cases := []struct {
-		line string
-		kind string
-		nums []int
-		text string
+		line  string
+		kind  string
+		nums  []int
+		ranks []ddz.Rank
+		text  string
 	}{
-		{line: "play 1 2 5", kind: "play", nums: []int{1, 2, 5}},
-		{line: "play 1-3", kind: "play", nums: []int{1, 2, 3}},
-		{line: "play 2 2", kind: "play", nums: []int{2, 2}},
-		{line: "PLAY 7", kind: "play", nums: []int{7}},
-		{line: "出牌 4", kind: "play", nums: []int{4}},
+		// 按牌面出牌
+		{line: "play 55", kind: "play", ranks: []ddz.Rank{ddz.Rank5, ddz.Rank5}},
+		{line: "play 5556", kind: "play", ranks: []ddz.Rank{ddz.Rank5, ddz.Rank5, ddz.Rank5, ddz.Rank6}},
+		{line: "play 34567", kind: "play", ranks: []ddz.Rank{ddz.Rank3, ddz.Rank4, ddz.Rank5, ddz.Rank6, ddz.Rank7}},
+		{line: "play wW", kind: "play", ranks: []ddz.Rank{ddz.RankJokerSmall, ddz.RankJokerBig}},
+		{line: "play T J Q K A", kind: "play", ranks: []ddz.Rank{ddz.Rank10, ddz.RankJ, ddz.RankQ, ddz.RankK, ddz.RankA}},
+		{line: "play 10 J Q K A", kind: "play", ranks: []ddz.Rank{ddz.Rank10, ddz.RankJ, ddz.RankQ, ddz.RankK, ddz.RankA}},
+		{line: "PLAY 99", kind: "play", ranks: []ddz.Rank{ddz.Rank9, ddz.Rank9}},
+		{line: "出 5", kind: "play", ranks: []ddz.Rank{ddz.Rank5}},
+		{line: "出牌 5555", kind: "play", ranks: []ddz.Rank{ddz.Rank5, ddz.Rank5, ddz.Rank5, ddz.Rank5}},
+
+		// 按手牌编号出牌（必须带 #）
+		{line: "play #1 #2 #5", kind: "play", nums: []int{1, 2, 5}},
+		{line: "play #1-#3", kind: "play", nums: []int{1, 2, 3}},
+		{line: "play #2 #2", kind: "play", nums: []int{2, 2}},
+
 		{line: "bid 0", kind: "bid", nums: []int{0}},
 		{line: "bid 3", kind: "bid", nums: []int{3}},
 		{line: "叫 2", kind: "bid", nums: []int{2}},
@@ -26,6 +39,8 @@ func TestParseDdzCmd(t *testing.T) {
 		{line: "start", kind: "start"},
 		{line: "next", kind: "next"},
 		{line: "ready", kind: "ready"},
+		{line: "hint", kind: "hint"},
+		{line: "提示", kind: "hint"},
 		{line: "help", kind: "help"},
 		{line: "leave", kind: "leave"},
 		{line: "quit", kind: "leave"},
@@ -36,9 +51,12 @@ func TestParseDdzCmd(t *testing.T) {
 
 		// 失败路径
 		{line: "play", kind: "bad"},
-		{line: "play a", kind: "bad"},
-		{line: "play 3-1", kind: "bad"},
-		{line: "play 1-99", kind: "bad"},
+		{line: "play X", kind: "bad"},     // 认不出的牌面
+		{line: "play 1", kind: "bad"},     // 旧编号写法已废弃，必须带 #
+		{line: "play 1 2 5", kind: "bad"}, // 同上
+		{line: "play #3 x", kind: "bad"},  // 两种写法不能混用
+		{line: "play #1-#0", kind: "bad"},
+		{line: "play #1-#99", kind: "bad"},
 		{line: "bid 4", kind: "bad"},
 		{line: "bid", kind: "bad"},
 		{line: "chat", kind: "bad"},
@@ -102,9 +120,15 @@ func TestHandIndicesToIDs(t *testing.T) {
 func TestActionFromCmd(t *testing.T) {
 	hand := []ddz.Card{{ID: 11, Rank: ddz.Rank9, Suit: ddz.SuitSpade}}
 
-	act, err := actionFromCmd(parseDdzCmd("play 1"), hand)
+	// 编号写法
+	act, err := actionFromCmd(parseDdzCmd("play #1"), hand)
 	if err != nil || act.Kind != ddz.ActPlay || len(act.Cards) != 1 || act.Cards[0] != 11 {
-		t.Fatalf("play 动作不对: %+v err=%v", act, err)
+		t.Fatalf("play #1 动作不对: %+v err=%v", act, err)
+	}
+	// 牌面写法
+	act, err = actionFromCmd(parseDdzCmd("play 9"), hand)
+	if err != nil || act.Kind != ddz.ActPlay || len(act.Cards) != 1 || act.Cards[0] != 11 {
+		t.Fatalf("play 9 动作不对: %+v err=%v", act, err)
 	}
 	act, err = actionFromCmd(parseDdzCmd("bid 2"), hand)
 	if err != nil || act.Kind != ddz.ActBid || act.Bid != 2 {
@@ -115,8 +139,54 @@ func TestActionFromCmd(t *testing.T) {
 		t.Fatalf("pass 动作不对: %+v err=%v", act, err)
 	}
 	// 编号越界在转换成动作时就该被拦住，不浪费一次网络往返
-	if _, err := actionFromCmd(parseDdzCmd("play 9"), hand); err == nil {
+	if _, err := actionFromCmd(parseDdzCmd("play #9"), hand); err == nil {
 		t.Fatal("越界编号应当报错")
+	}
+}
+
+// TestHandRanksToIDs 验证"按牌面出牌"如何落到具体的牌上。
+func TestHandRanksToIDs(t *testing.T) {
+	hand := []ddz.Card{
+		{ID: 1, Rank: ddz.Rank5, Suit: ddz.SuitSpade},
+		{ID: 2, Rank: ddz.Rank5, Suit: ddz.SuitHeart},
+		{ID: 3, Rank: ddz.Rank3, Suit: ddz.SuitClub},
+		{ID: 4, Rank: ddz.Rank7, Suit: ddz.SuitDiamond},
+	}
+
+	ids, err := handRanksToIDs(hand, []ddz.Rank{ddz.Rank5, ddz.Rank5, ddz.Rank7})
+	if err != nil {
+		t.Fatalf("按牌面取牌失败: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("应当取 3 张，实际 %v", ids)
+	}
+	// 同点数的牌挑哪几张都一样，只要不重复、且都在手里
+	seen := map[int]bool{}
+	ranks := map[int]ddz.Rank{}
+	for _, c := range hand {
+		ranks[c.ID] = c.Rank
+	}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("重复取到了 id=%d", id)
+		}
+		seen[id] = true
+	}
+	if ranks[ids[0]] != ddz.Rank5 || ranks[ids[1]] != ddz.Rank5 || ranks[ids[2]] != ddz.Rank7 {
+		t.Fatalf("取到的点数不对: %v", ids)
+	}
+
+	// 手里牌不够时要给出说明张数的错误
+	if _, err := handRanksToIDs(hand, []ddz.Rank{ddz.Rank5, ddz.Rank5, ddz.Rank5}); err == nil {
+		t.Fatal("只有两张 5 却要出三张，应当报错")
+	} else if !strings.Contains(err.Error(), "只有 2 张") {
+		t.Fatalf("错误信息应当说明手里有几张: %v", err)
+	}
+	if _, err := handRanksToIDs(hand, []ddz.Rank{ddz.RankJokerBig}); err == nil {
+		t.Fatal("手里没有的牌应当报错")
+	}
+	if _, err := handRanksToIDs(nil, []ddz.Rank{ddz.Rank3}); err == nil {
+		t.Fatal("空手牌应当报错")
 	}
 }
 
@@ -151,5 +221,79 @@ func TestNewDdzHostRoomWiring(t *testing.T) {
 	}
 	if f.Hand != nil {
 		t.Fatalf("没开局时不该有手牌: %v", f.Hand)
+	}
+}
+
+// TestShowHintsOutputIsUsable 保证 hint 给出的写法不只是给人看的：
+// 把它原样喂回命令解析，必须能变成一手合法出牌。
+func TestShowHintsOutputIsUsable(t *testing.T) {
+	r := newDdzRoom("9988", 1, 10)
+	r.you = 0
+	r.started = true
+	r.hand = mustTestCards(t, "5", "5", "5", "6", "8", "9")
+	r.view = emptyView()
+	r.view.Phase = ddz.PhasePlaying
+
+	r.showHints()
+	if len(r.log) == 0 {
+		t.Fatal("showHints 没有写任何日志")
+	}
+	line := r.log[len(r.log)-1]
+	if !strings.HasPrefix(line, "可以出") {
+		t.Fatalf("自由出牌权下的提示文案不对: %q", line)
+	}
+
+	// 取出提示里的第一种写法（形如 "对子(5) play 55"），喂回命令解析
+	at := strings.Index(line, "play ")
+	if at < 0 {
+		t.Fatalf("提示里没有可直接使用的 play 写法: %q", line)
+	}
+	fields := strings.Fields(line[at:]) // ["play", "55", "|", ...]
+	if len(fields) < 2 {
+		t.Fatalf("提示里的写法不完整: %q", line)
+	}
+	notation := fields[1]
+
+	cmd := parseDdzCmd("play " + notation)
+	if cmd.kind != "play" {
+		t.Fatalf("hint 给出的写法 %q 解析失败: kind=%s text=%s", notation, cmd.kind, cmd.text)
+	}
+	act, err := actionFromCmd(cmd, r.hand)
+	if err != nil {
+		t.Fatalf("hint 给出的写法 %q 无法执行: %v", notation, err)
+	}
+	if _, _, err := ddz.LegalPlay(r.hand, act.Cards, nil); err != nil {
+		t.Fatalf("hint 给出的 %q 不是合法牌型: %v", notation, err)
+	}
+
+	// 有上家牌时，提示必须真的能压过去
+	upstream := ddz.PlayView{Seat: 2, Kind: ddz.KindSingle, Main: ddz.Rank8, Size: 1, Chain: 1, Label: "单张(8)"}
+	upstreamPlay := &ddz.Play{Seat: 2, Combo: upstream.AsCombo()}
+	r.view.LastPlay = &upstream
+	r.log = nil
+	r.showHints()
+	if len(r.log) == 0 {
+		t.Fatal("有上家牌时 showHints 没有输出")
+	}
+	line = r.log[len(r.log)-1]
+	if !strings.HasPrefix(line, "可以压过") {
+		t.Fatalf("有上家牌时的提示文案不对: %q", line)
+	}
+	at = strings.Index(line, "play ")
+	if at < 0 {
+		t.Fatalf("提示里没有可直接使用的写法: %q", line)
+	}
+	notation = strings.Fields(line[at:])[1]
+	cmd = parseDdzCmd("play " + notation)
+	act, err = actionFromCmd(cmd, r.hand)
+	if err != nil {
+		t.Fatalf("压牌提示 %q 无法执行: %v", notation, err)
+	}
+	combo, _, err := ddz.LegalPlay(r.hand, act.Cards, upstreamPlay)
+	if err != nil {
+		t.Fatalf("压牌提示 %q 不合法: %v", notation, err)
+	}
+	if !combo.Beats(upstream.AsCombo()) {
+		t.Fatalf("压牌提示 %q 其实压不过 %s", notation, upstream.Label)
 	}
 }
