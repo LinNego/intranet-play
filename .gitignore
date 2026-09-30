@@ -2,3 +2,4 @@ intranet-play.exe
 *.exe
 .idea/
 .vscode/
+.gocache/
