@@ -82,6 +82,20 @@ func ListenAndAccept(addr string) (net.Listener, *Conn, error) {
 	return ln, NewConn(raw), nil
 }
 
+// Listen 只监听不接收，供需要多个连接的游戏（如斗地主）自己管理 accept 循环。
+func Listen(addr string) (net.Listener, error) {
+	return net.Listen("tcp", addr)
+}
+
+// Accept 接收一条连接并包装成 Conn。
+func Accept(ln net.Listener) (*Conn, error) {
+	raw, err := ln.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return NewConn(raw), nil
+}
+
 func Connect(addr string) (*Conn, error) {
 	c, err := net.DialTimeout("tcp", addr, time.Second*5)
 	if err != nil {
