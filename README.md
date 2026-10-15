@@ -6,6 +6,7 @@
 |---|---|---|
 | 五子棋 | 2 人 | `intranet-play host` / `intranet-play join` |
 | 斗地主 | 3 人 | `intranet-play ddz host` / `intranet-play ddz join` |
+| 21 点 | 2~6 人 | `intranet-play bj host` / `intranet-play bj join` |
 
 UI 刻意做成"数据面板"的样子（`nx-sync`），在工位上不显眼。
 
@@ -80,6 +81,40 @@ log: 可以压过顺子(7): 单张(T) play T | 对子(5) play 55 | 炸弹(2) pla
 
 牌面里 `w` / `W` 是大小王，`♠♥♣♦` 是花色；手牌按牌力降序编号（界面上的 `#n`），出牌后重新编号。
 
+### 21 点（2~6 人）
+
+大家一起对一个**虚拟庄家**（程序按固定规则打，不占座位），房主也照常下注：
+
+```powershell
+# 房主（也是玩家）
+.\intranet-play.exe bj host -port 9988 -name Alice -chips 100 -seats 4
+
+# 其他人
+.\intranet-play.exe bj join -addr 192.168.1.23:9988 -name Bob
+.\intranet-play.exe bj join -addr 192.168.1.23:9988 -name Cara
+```
+
+人齐后房主输入 `start`。下注阶段每个人 `bet 10`，**全员下注完自动发牌**。
+
+| 命令 | 作用 |
+|---|---|
+| `bet 10` | 下注（也可写 `押 10` / `下注 10`） |
+| `hit` / `要` | 要一张牌 |
+| `stand` / `停` | 停牌 |
+| `double` / `双倍` | 双倍下注：加注一份、只补一张、自动停牌（仅限起手两张时） |
+| `next` | 结算后开下一轮 |
+| `start` / `restart` | 房主开局 / 重开一局（把中途加入的人也带进来） |
+| `chat TEXT` / `help` / `leave` | 聊天 / 帮助 / 退出 |
+
+规则要点：
+
+- 52 张（不含大小王），每局重新洗牌；点数 2-10 按面值、J/Q/K 记 10、A 先按 11 算（爆牌时降为 1，界面会显示"软 x 点"）
+- **庄家暗牌在结算前只显示 `?`**，公共报文里没有它的牌面
+- 庄家点数 <17 必须要牌、≥17 停（软 17 也停）；**闲家全部爆牌时庄家不补牌**
+- 黑杰克（起手两张 21 点）赔 3:2；平局退还注额；庄家爆牌时未爆的闲家通吃
+- 筹码初始 100（`-chips` 可改），输光在下一轮自动补满；下注时即扣、结算时按净输赢退还
+- 对局中有人掉线，本局作废回大厅（房主 `start` 重开）
+
 ---
 
 ## 连不上怎么办
@@ -103,20 +138,23 @@ go build ./cmd/intranet-play
 目录结构：
 
 ```text
-cmd/intranet-play/      命令行入口（host / join / ddz）
-internal/protocol/      一行一条 JSON 的消息定义（五子棋 + DDZ_*）
+cmd/intranet-play/      命令行入口（host / join / ddz / bj）
+internal/protocol/      一行一条 JSON 的消息定义（五子棋 + DDZ_* + BJ_*）
 internal/netx/          TCP 连接封装（inbox channel + 写锁）
 internal/game/          五子棋棋盘引擎
 internal/ddz/           斗地主规则引擎（牌型判定、比较、对局状态机）
-internal/room/          房间编排：五子棋 2 人；ddz_* 为 3 人斗地主
-internal/ui/            终端界面（bubbletea）：tui.go 五子棋，ddz.go 斗地主
+internal/bj/            21 点规则引擎（点数、要牌/停牌/双倍、庄家、筹码结算）
+internal/room/          房间编排：五子棋 2 人；ddz_* 3 人斗地主；bj_* 2~6 人 21 点
+internal/ui/            终端界面（bubbletea）：tui.go 五子棋，ddz.go 斗地主，bj.go 21 点
 docs/开发计划.md          五子棋开发计划
 docs/斗地主开发计划.md     斗地主开发计划与实施进度
+docs/21点开发计划.md       21 点开发计划
 ```
 
 设计约定：
 
 - **权威只在房主**：客户端只发命令、只渲染收到的视图，绝不本地推演
-- **手牌只单播**：公共状态里只有张数，任何人的手牌明文只发给本人；这条红线上有专门的测试兜着
-- **出牌用 cardID**：客户端上报的是手牌编号对应的牌 ID，房主校验归属，无法伪造
+- **手牌只单播**：斗地主里公共状态只有张数，手牌明文只发给本人；21 点更简单——闲家牌本来就是明牌，庄家暗牌只要"不下发"就够了
+- **出牌用 cardID**：客户端上报的是牌 ID，房主校验归属，无法伪造
+- **隐藏信息要有测试兜着**：斗地主的公共视图、21 点的公共报文都各有一条"序列化后数牌数"的断言
 - **协议向后兼容**：未知 `type` 一律忽略，方便以后加字段

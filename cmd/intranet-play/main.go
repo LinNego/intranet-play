@@ -70,8 +70,47 @@ func main() {
 			fmt.Println("Usage: intranet-play ddz <host|join>")
 			os.Exit(1)
 		}
+	case "bj":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: intranet-play bj <host|join>")
+			os.Exit(1)
+		}
+		switch os.Args[2] {
+		case "host":
+			fs := flag.NewFlagSet("bj host", flag.ExitOnError)
+			port := fs.Int("port", 9988, "port to listen on")
+			name := fs.String("name", "Player 1", "name to use for the game")
+			chips := fs.Int("chips", 100, "starting chips per player")
+			seats := fs.Int("seats", 4, "max players at the table (2-6)")
+			_ = fs.Parse(os.Args[3:])
+			if err := room.RunBjHost(*name, *port, *chips, *seats); err != nil {
+				log.Fatal(err)
+			}
+		case "join":
+			fs := flag.NewFlagSet("bj join", flag.ExitOnError)
+			addr := fs.String("addr", "127.0.0.1:9988", "address to connect to")
+			name := fs.String("name", "Player 2", "name to use for the game")
+			_ = fs.Parse(os.Args[3:])
+			if err := room.RunBjClient(*name, *addr); err != nil {
+				log.Fatal(err)
+			}
+		case "help":
+			fmt.Println("Usage: intranet-play bj <host|join>")
+			fmt.Println("Options:")
+			fmt.Println("  host -port int      port to listen on (default 9988)")
+			fmt.Println("  host -name string   name to use for the game (default Player 1)")
+			fmt.Println("  host -chips int     starting chips per player (default 100)")
+			fmt.Println("  host -seats int     max players at the table, 2-6 (default 4)")
+			fmt.Println("  join -addr string   address to connect to (default 127.0.0.1:9988)")
+			fmt.Println("  join -name string   name to use for the game (default Player 2)")
+			fmt.Println("提示: 21 点是大家一起对庄家，房主也占一个座位，人齐后房主输入 start")
+			os.Exit(1)
+		default:
+			fmt.Println("Usage: intranet-play bj <host|join>")
+			os.Exit(1)
+		}
 	case "help":
-		fmt.Println("Usage: intranet-play <host|join|ddz>")
+		fmt.Println("Usage: intranet-play <host|join|ddz|bj>")
 		fmt.Println("Options:")
 		fmt.Println("  host -port int       port to listen on (default 9988)")
 		fmt.Println("  host -name string    name to use for the game (default Player 1)")
@@ -79,9 +118,10 @@ func main() {
 		fmt.Println("  join -addr string    address to connect to (default 127.0.0.1:9988)")
 		fmt.Println("  join -name string    name to use for the game (default Player 2)")
 		fmt.Println("  ddz <host|join>      3 人斗地主（3 人局，房主占一个座位）")
+		fmt.Println("  bj <host|join>       21 点（2-6 人，大家一起对虚拟庄家）")
 		os.Exit(1)
 	default:
-		fmt.Println("Usage: intranet-play <host|join|ddz>")
+		fmt.Println("Usage: intranet-play <host|join|ddz|bj>")
 		os.Exit(1)
 	}
 }
