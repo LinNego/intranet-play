@@ -69,6 +69,8 @@ func (b *bjBotUI) UpdateFrame(f ui.BjFrame) {
 			b.startedOnce = true
 			line = "start"
 		}
+	case f.Over:
+		// 整桌结束了，等测试断言，不再自动 next
 	case f.Phase == bj.PhaseSettle && b.settled < b.maxRounds:
 		line = "next"
 	default:
@@ -136,11 +138,23 @@ func bjFrameKey(seat int, f ui.BjFrame) string {
 }
 
 // bjDecide 只负责自己的下注与行动：17 点以下继续要牌，够 17 就停。
+// 坐庄和出局的座位什么都不用做。
 func bjDecide(seat int, f ui.BjFrame) string {
+	s := bjSeatAt(f, seat)
+	if s == nil {
+		return ""
+	}
+	switch s.Status {
+	case bj.StatusDealer, bj.StatusOut:
+		return ""
+	}
 	switch f.Phase {
 	case bj.PhaseBetting:
-		if s := bjSeatAt(f, seat); s != nil && s.Status == bj.StatusIdle {
+		if s.Status == bj.StatusIdle {
 			amount := 5
+			if s.MaxBet < amount {
+				amount = s.MaxBet
+			}
 			if s.Chips < amount {
 				amount = s.Chips
 			}
@@ -151,10 +165,6 @@ func bjDecide(seat int, f ui.BjFrame) string {
 		}
 	case bj.PhasePlaying:
 		if f.Turn != seat {
-			return ""
-		}
-		s := bjSeatAt(f, seat)
-		if s == nil {
 			return ""
 		}
 		if s.Score < 17 {
@@ -188,6 +198,7 @@ func bjFrameOf(view bj.PublicView, seats []protocol.BjSeatPayload, you int) ui.B
 			vs := view.Seats[i]
 			info.Bet, info.Status = vs.Bet, vs.Status
 			info.Cards, info.Score, info.Soft, info.Chips = vs.Cards, vs.Score, vs.Soft, vs.Chips
+			info.MaxBet = vs.MaxBet // 漏了这行机器人就会以为"最多只能押 0"，干看着不下注
 		}
 		f.Seats = append(f.Seats, info)
 	}
@@ -227,15 +238,16 @@ type bjWireBot struct {
 	name      string
 	maxRounds int
 
-	mu       sync.Mutex
-	seat     int
-	seats    []protocol.BjSeatPayload
-	problems []string
-	sumDelta map[int]int
-	chips    map[int]int
-	lastSeen int
-	actions  int
-	key      string
+	mu         sync.Mutex
+	seat       int
+	seats      []protocol.BjSeatPayload
+	problems   []string
+	sumDelta   map[int]int
+	dealerGain map[int]int
+	chips      map[int]int
+	lastSeen   int
+	actions    int
+	key        string
 }
 
 func (b *bjWireBot) problemf(format string, args ...any) {
@@ -312,11 +324,18 @@ func (b *bjWireBot) audit(raw json.RawMessage, p protocol.BjPublicPayload) {
 			b.lastSeen = p.View.Round
 			if b.sumDelta == nil {
 				b.sumDelta = map[int]int{}
+				b.dealerGain = map[int]int{}
 				b.chips = map[int]int{}
 			}
 			for _, r := range p.View.Results {
 				b.sumDelta[r.Seat] += r.Delta
-				b.chips[r.Seat] = r.Chips
+			}
+			// 轮庄时庄家自己没下注，他的变化走 DealerDelta
+			if p.View.Dealer.IsSeat {
+				b.dealerGain[p.View.Dealer.Seat] += p.View.Dealer.Delta
+			}
+			for _, sv := range p.View.Seats {
+				b.chips[sv.Seat] = sv.Chips
 			}
 		}
 		b.mu.Unlock()
@@ -367,7 +386,7 @@ func TestBjMultiPlayerEndToEnd(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 
-	host := newBjHostRoom("9988", "Host", 100, 4)
+	host := newBjHostRoom("9988", "Host", 100, 4, "auto")
 	hostBot := newBjBotUI(0, 3, 2) // 三人齐了才开局，打完两轮就停
 	host.app = hostBot
 	go func() { _ = host.serveHost(ln) }()
@@ -404,11 +423,13 @@ func TestBjMultiPlayerEndToEnd(t *testing.T) {
 		}
 	}
 
-	// 每个客户端都必须真的下过注、做过决定，且筹码自洽
+	// 每个客户端都必须真的下过注、做过决定，且筹码能对上账
+	startChips := 100
+	seats := 3
 	for _, b := range bots {
 		b.mu.Lock()
 		actions, seat, name := b.actions, b.seat, b.name
-		sumDelta, chips := b.sumDelta, b.chips
+		sumDelta, dealerGain, chips := b.sumDelta, b.dealerGain, b.chips
 		b.mu.Unlock()
 		if actions == 0 {
 			t.Fatalf("客户端 %s 一次都没行动过", name)
@@ -416,10 +437,18 @@ func TestBjMultiPlayerEndToEnd(t *testing.T) {
 		if seat != 1 && seat != 2 {
 			t.Fatalf("客户端 %s 的座位 = %d, 期望 1 或 2", name, seat)
 		}
-		for s := 0; s < 3; s++ {
-			if want := 100 + sumDelta[s]; chips[s] != want {
-				t.Fatalf("座位 %d 两轮后筹码 = %d, 期望 %d（净输赢累计 %d）", s, chips[s], want, sumDelta[s])
+		total := 0
+		for s := 0; s < seats; s++ {
+			want := startChips + sumDelta[s] + dealerGain[s]
+			if chips[s] != want {
+				t.Fatalf("座位 %d 两轮后筹码 = %d, 期望 %d（闲家净输赢 %d + 坐庄收付 %d）",
+					s, chips[s], want, sumDelta[s], dealerGain[s])
 			}
+			total += chips[s]
+		}
+		// 轮庄模式下筹码只在玩家之间流动，总额必须守恒
+		if want := startChips * seats; total != want {
+			t.Fatalf("轮庄筹码应当守恒：总额 %d, 期望 %d", total, want)
 		}
 	}
 }
@@ -432,8 +461,8 @@ func TestBjRoomFull(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 
-	host := newBjHostRoom("9988", "Host", 100, 2) // 房主 + 1 个客户端就满了
-	hostBot := newBjBotUI(0, 99, 0)               // 这个测试不需要机器人开局
+	host := newBjHostRoom("9988", "Host", 100, 2, "virtual") // 房主 + 1 个客户端就满了
+	hostBot := newBjBotUI(0, 99, 0)                          // 这个测试不需要机器人开局
 	host.app = hostBot
 	go func() { _ = host.serveHost(ln) }()
 	defer hostBot.Quit()
@@ -482,7 +511,7 @@ func TestBjDisconnectAbortsGame(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 
-	host := newBjHostRoom("9988", "Host", 100, 3)
+	host := newBjHostRoom("9988", "Host", 100, 3, "virtual")
 	hostBot := newBjBotUI(0, 2, 0) // 两人齐了就开局，之后不主动 next
 	host.app = hostBot
 	go func() { _ = host.serveHost(ln) }()

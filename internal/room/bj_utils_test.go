@@ -87,10 +87,36 @@ func TestBjActionFromCmd(t *testing.T) {
 	}
 }
 
+// TestResolveDealerMode auto 的含义：2 人用虚拟庄家（否则每局都有一半人没牌可打），
+// 3 人以上轮流坐庄。
+func TestResolveDealerMode(t *testing.T) {
+	cases := []struct {
+		flag  string
+		seats int
+		want  bj.DealerMode
+	}{
+		{flag: "auto", seats: 2, want: bj.DealerVirtual},
+		{flag: "auto", seats: 3, want: bj.DealerRotate},
+		{flag: "auto", seats: 6, want: bj.DealerRotate},
+		{flag: "", seats: 3, want: bj.DealerRotate},
+		{flag: "rotate", seats: 2, want: bj.DealerRotate},
+		{flag: "virtual", seats: 5, want: bj.DealerVirtual},
+		{flag: "ROTATE", seats: 2, want: bj.DealerRotate},
+		{flag: "轮庄", seats: 2, want: bj.DealerRotate},
+		{flag: "虚拟", seats: 5, want: bj.DealerVirtual},
+		{flag: "看不懂的", seats: 3, want: bj.DealerRotate}, // 落到 auto
+	}
+	for _, tc := range cases {
+		if got := resolveDealerMode(tc.flag, tc.seats); got != tc.want {
+			t.Fatalf("resolveDealerMode(%q, %d) = %s, 期望 %s", tc.flag, tc.seats, got, tc.want)
+		}
+	}
+}
+
 // TestNewBjHostRoomWiring 锁住接线细节：房名是端口、座位 0 的名字是玩家名，
 // 而且没开局时 Turn 必须是 -1（零值 0 会让界面把座位 0 标成当前行动方）。
 func TestNewBjHostRoomWiring(t *testing.T) {
-	r := newBjHostRoom("9988", "Alice", 200, 4)
+	r := newBjHostRoom("9988", "Alice", 200, 4, "auto")
 
 	if r.name != "9988" {
 		t.Fatalf("房名 = %q, 期望端口号 9988", r.name)

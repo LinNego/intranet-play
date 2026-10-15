@@ -82,8 +82,9 @@ func main() {
 			name := fs.String("name", "Player 1", "name to use for the game")
 			chips := fs.Int("chips", 100, "starting chips per player")
 			seats := fs.Int("seats", 4, "max players at the table (2-6)")
+			dealer := fs.String("dealer", "auto", "dealer mode: auto (2 players virtual, 3+ rotate) | rotate | virtual")
 			_ = fs.Parse(os.Args[3:])
-			if err := room.RunBjHost(*name, *port, *chips, *seats); err != nil {
+			if err := room.RunBjHost(*name, *port, *chips, *seats, *dealer); err != nil {
 				log.Fatal(err)
 			}
 		case "join":
@@ -101,9 +102,12 @@ func main() {
 			fmt.Println("  host -name string   name to use for the game (default Player 1)")
 			fmt.Println("  host -chips int     starting chips per player (default 100)")
 			fmt.Println("  host -seats int     max players at the table, 2-6 (default 4)")
+			fmt.Println("  host -dealer string dealer mode: auto|rotate|virtual (default auto =")
+			fmt.Println("                      2 人虚拟庄家，3 人以上轮流坐庄)")
 			fmt.Println("  join -addr string   address to connect to (default 127.0.0.1:9988)")
 			fmt.Println("  join -name string   name to use for the game (default Player 2)")
-			fmt.Println("提示: 21 点是大家一起对庄家，房主也占一个座位，人齐后房主输入 start")
+			fmt.Println("提示: 21 点人齐后房主输入 start；默认 3 人以上轮流坐庄、2 人虚拟庄家，")
+			fmt.Println("      筹码输光即出局，只剩一人时整桌结束（restart 可重开）")
 			os.Exit(1)
 		default:
 			fmt.Println("Usage: intranet-play bj <host|join>")

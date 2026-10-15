@@ -26,17 +26,19 @@ type BjSeatPayload struct {
 
 // BjLobbyPayload 只在加入时单播给本人，因此可以带 You。
 type BjLobbyPayload struct {
-	You   int             `json:"you"`
-	Seats []BjSeatPayload `json:"seats"`
-	Max   int             `json:"max"`
-	Chips int             `json:"chips"`
+	You    int             `json:"you"`
+	Seats  []BjSeatPayload `json:"seats"`
+	Max    int             `json:"max"`
+	Chips  int             `json:"chips"`
+	Dealer string          `json:"dealer"` // 房主的庄家模式设置：auto / rotate / virtual
 }
 
 // BjStartPayload 通知开局或重开。
 type BjStartPayload struct {
-	Round int `json:"round"`
-	Chips int `json:"chips"`
-	Seats int `json:"seats"`
+	Round int    `json:"round"`
+	Chips int    `json:"chips"`
+	Seats int    `json:"seats"`
+	Mode  string `json:"mode"` // VIRTUAL / ROTATE
 }
 
 // BjPublicPayload 广播用。庄家暗牌只有张数，绝无牌面。

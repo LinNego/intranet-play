@@ -23,14 +23,16 @@ type bjInbound struct {
 }
 
 // RunBjHost 开一个 2~6 人 21 点房间：本进程占座位 0，其余人 join 进来。
-func RunBjHost(name string, port, chips, maxSeats int) error {
+// dealerFlag 见 resolveDealerMode：auto 表示 2 人虚拟庄家、3 人以上轮流坐庄。
+func RunBjHost(name string, port, chips, maxSeats int, dealerFlag string) error {
 	ln, err := netx.Listen(netx.LocalAddr(port))
 	if err != nil {
 		return err
 	}
 
-	r := newBjHostRoom(fmt.Sprintf("%d", port), name, chips, maxSeats)
+	r := newBjHostRoom(fmt.Sprintf("%d", port), name, chips, maxSeats, dealerFlag)
 	r.logf("房间已开启（端口 %d，最多 %d 人，初始筹码 %d）", port, maxSeats, r.startChips)
+	r.logf("庄家模式：%s（-dealer auto|rotate|virtual）", r.dealerFlag)
 	r.logf("等人齐后输入 start；对局中可用 hit/stand/double，结算后 next 开下一轮")
 	// Run 之前不能 render（Program.Send 会永久阻塞），日志直接放进初始帧。
 	r.app = ui.NewBjApp(r.frame())
@@ -231,7 +233,7 @@ func (r *bjRoom) handleHostLocal(line string) (done bool) {
 		r.render()
 
 	case "start":
-		if r.started {
+		if r.started && r.view.Phase != bj.PhaseOver {
 			r.logf("对局已经开始了")
 			r.render()
 			return false
@@ -239,7 +241,7 @@ func (r *bjRoom) handleHostLocal(line string) (done bool) {
 		r.startGame(false)
 
 	case "restart":
-		if r.started && r.view.Phase != bj.PhaseSettle {
+		if r.started && r.view.Phase != bj.PhaseSettle && r.view.Phase != bj.PhaseOver {
 			r.logf("本局还没结算，等这一轮打完再 restart")
 			r.render()
 			return false
@@ -300,20 +302,24 @@ func (r *bjRoom) startGame(restart bool) {
 	if r.rng == nil {
 		r.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
-	r.game = bj.NewGame(r.rng, len(r.seats), r.startChips)
+	mode := resolveDealerMode(r.dealerFlag, len(r.seats))
+	r.game = bj.NewGame(r.rng, len(r.seats), r.startChips, mode)
 	r.started = true
 	r.view = r.game.PublicView()
 
 	env, err := protocol.NewEnvelope(protocol.TypeBjStart, "host", protocol.BjStartPayload{
-		Round: r.game.Round, Chips: r.startChips, Seats: len(r.seats),
+		Round: r.game.Round, Chips: r.startChips, Seats: len(r.seats), Mode: string(mode),
 	})
 	if err == nil {
 		r.broadcast(env)
 	}
 	if restart {
-		r.logf("重开一局：%d 人，初始筹码 %d", len(r.seats), r.startChips)
+		r.logf("重开一桌：%d 人，初始筹码 %d，%s", len(r.seats), r.startChips, dealerModeText(mode))
 	} else {
-		r.logf("开局：%d 人，初始筹码 %d，请下注", len(r.seats), r.startChips)
+		r.logf("开局：%d 人，初始筹码 %d，%s，请下注", len(r.seats), r.startChips, dealerModeText(mode))
+	}
+	if r.view.Dealer.IsSeat {
+		r.logf("本局庄家是 %s（座位 %d），庄家不下注、按规则自动补牌", r.nameOf(r.view.Dealer.Seat), r.view.Dealer.Seat)
 	}
 	r.pushAll()
 }

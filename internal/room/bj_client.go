@@ -33,7 +33,7 @@ func RunBjClient(name string, addr string) error {
 		return err
 	}
 
-	r := newBjRoom(addr, lobby.Chips, lobby.Max)
+	r := newBjRoom(addr, lobby.Chips, lobby.Max, lobby.Dealer)
 	r.applyLobby(lobby)
 	r.logf("已加入牌桌，你是座位 %d，等房主 start", r.you)
 	// Run 之前不能 render（Program.Send 会永久阻塞），日志放进初始帧。
@@ -87,6 +87,9 @@ func (r *bjRoom) applyLobby(p protocol.BjLobbyPayload) {
 	r.you = p.You
 	r.startChips = p.Chips
 	r.maxSeats = p.Max
+	if p.Dealer != "" {
+		r.dealerFlag = p.Dealer
+	}
 	r.seats = seatsFromBjPayload(p.Seats)
 	// 收到大厅消息就说明牌桌当前没有进行中的对局（对局中房主只会广播公共状态）
 	r.started = false
@@ -152,7 +155,11 @@ func (r *bjRoom) handleClientEnv(env protocol.Envelope) {
 		}
 		r.started = true
 		r.startChips = p.Chips
-		r.logf("第 %d 轮开始：%d 人，初始筹码 %d", p.Round, p.Seats, p.Chips)
+		mode := "虚拟庄家"
+		if bj.DealerMode(p.Mode) == bj.DealerRotate {
+			mode = "轮流坐庄"
+		}
+		r.logf("第 %d 轮开始：%d 人，初始筹码 %d，%s", p.Round, p.Seats, p.Chips, mode)
 
 	case protocol.TypeBjPublic:
 		var p protocol.BjPublicPayload

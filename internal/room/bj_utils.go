@@ -43,6 +43,7 @@ type bjRoom struct {
 	you         int
 	startChips  int
 	maxSeats    int
+	dealerFlag  string // auto / rotate / virtual
 	seats       []*bjSeat
 	game        *bj.Game
 	view        bj.PublicView
@@ -54,24 +55,64 @@ type bjRoom struct {
 	rng         *rand.Rand
 }
 
-func newBjRoom(name string, chips, maxSeats int) *bjRoom {
+func newBjRoom(name string, chips, maxSeats int, dealerFlag string) *bjRoom {
 	if chips <= 0 {
 		chips = 100
 	}
 	if maxSeats <= 0 {
 		maxSeats = 4
 	}
-	return &bjRoom{name: name, startChips: chips, maxSeats: maxSeats, view: emptyBjView()}
+	if dealerFlag == "" {
+		dealerFlag = dealerAuto
+	}
+	return &bjRoom{
+		name:       name,
+		startChips: chips,
+		maxSeats:   maxSeats,
+		dealerFlag: dealerFlag,
+		view:       emptyBjView(),
+	}
 }
 
 // newBjHostRoom 建好房主座位（座位 0）。room 是房间标识（用端口号），
 // hostName 是房主这个玩家的名字，两者不能混。
-func newBjHostRoom(room, hostName string, chips, maxSeats int) *bjRoom {
-	r := newBjRoom(room, chips, maxSeats)
+func newBjHostRoom(room, hostName string, chips, maxSeats int, dealerFlag string) *bjRoom {
+	r := newBjRoom(room, chips, maxSeats, dealerFlag)
 	r.you = 0
 	r.seats = append(r.seats, &bjSeat{name: hostName, online: true, joined: true, isHost: true})
 	r.refreshSeatInfo()
 	return r
+}
+
+// 庄家模式的三种取值与解析。
+const (
+	dealerAuto    = "auto"
+	dealerRotate  = "rotate"
+	dealerVirtual = "virtual"
+)
+
+// resolveDealerMode 把命令行开关解析成实际模式：auto 表示 2 人用虚拟庄家
+// （否则每局都有一半人没牌可打），3 人以上轮流坐庄。
+func resolveDealerMode(flag string, seats int) bj.DealerMode {
+	switch strings.ToLower(strings.TrimSpace(flag)) {
+	case dealerRotate, "轮庄":
+		return bj.DealerRotate
+	case dealerVirtual, "虚拟":
+		return bj.DealerVirtual
+	default:
+		if seats >= 3 {
+			return bj.DealerRotate
+		}
+		return bj.DealerVirtual
+	}
+}
+
+// dealerModeText 是给玩家看的模式说明。
+func dealerModeText(mode bj.DealerMode) string {
+	if mode == bj.DealerRotate {
+		return "轮流坐庄"
+	}
+	return "虚拟庄家"
 }
 
 // emptyBjView 是"还没开局"的公共状态。Turn 必须显式设成 -1，
@@ -123,6 +164,7 @@ func (r *bjRoom) refreshSeatInfo() {
 			vs := r.view.Seats[i]
 			info.Bet, info.Status = vs.Bet, vs.Status
 			info.Cards, info.Score, info.Soft, info.Chips = vs.Cards, vs.Score, vs.Soft, vs.Chips
+			info.MaxBet = vs.MaxBet
 		}
 		infos = append(infos, info)
 	}
@@ -138,16 +180,23 @@ func (r *bjRoom) frame() ui.BjFrame {
 		Round:   r.view.Round,
 		Started: r.started,
 		Phase:   r.view.Phase,
+		Mode:    r.view.Mode,
 		Turn:    r.view.Turn,
 		Seats:   seats,
 		Dealer: ui.BjDealerInfo{
-			Up:     r.view.Dealer.Up,
-			Hidden: r.view.Dealer.Hidden,
-			Score:  r.view.Dealer.Score,
-			Soft:   r.view.Dealer.Soft,
-			Final:  r.view.Dealer.Final,
+			Up:      r.view.Dealer.Up,
+			Hidden:  r.view.Dealer.Hidden,
+			Score:   r.view.Dealer.Score,
+			Soft:    r.view.Dealer.Soft,
+			Final:   r.view.Dealer.Final,
+			IsSeat:  r.view.Dealer.IsSeat,
+			Seat:    r.view.Dealer.Seat,
+			Delta:   r.view.Dealer.Delta,
+			NeedBet: r.view.Dealer.NeedBet,
 		},
 		Results: r.view.Results,
+		Over:    r.view.Over,
+		Winner:  r.view.Winner,
 		Log:     append([]string(nil), r.log...),
 	}
 }
@@ -250,10 +299,11 @@ func (r *bjRoom) pushLobby() {
 			continue
 		}
 		env, err := protocol.NewEnvelope(protocol.TypeBjLobby, "host", protocol.BjLobbyPayload{
-			You:   seat,
-			Seats: r.seatPayloads(),
-			Max:   r.maxSeats,
-			Chips: r.startChips,
+			You:    seat,
+			Seats:  r.seatPayloads(),
+			Max:    r.maxSeats,
+			Chips:  r.startChips,
+			Dealer: r.dealerFlag,
 		})
 		if err == nil {
 			_ = s.conn.Send(env)

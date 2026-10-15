@@ -152,6 +152,7 @@ func TestBjHelpLineFollowsPhase(t *testing.T) {
 		{name: "下注", frame: BjFrame{Started: true, Phase: bj.PhaseBetting}, want: "bet 10"},
 		{name: "行动", frame: BjFrame{Started: true, Phase: bj.PhasePlaying}, want: "hit（要牌）"},
 		{name: "结算", frame: BjFrame{Started: true, Phase: bj.PhaseSettle}, want: "next（下一轮）"},
+		{name: "整桌结束", frame: BjFrame{Started: true, Over: true}, want: "restart（房主）"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,6 +160,76 @@ func TestBjHelpLineFollowsPhase(t *testing.T) {
 				t.Fatalf("帮助行 = %q, 期望包含 %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBjViewRotateDealerAndEliminated 轮庄与出局的界面表现：
+// 座位标 [庄]/[出局]，坐庄的人看不到 hit/stand，整桌结束有提示。
+func TestBjViewRotateDealerAndEliminated(t *testing.T) {
+	f := BjFrame{
+		Room:    "9988",
+		You:     0,
+		Round:   4,
+		Started: true,
+		Phase:   bj.PhasePlaying,
+		Mode:    bj.DealerRotate,
+		Turn:    2,
+		Seats: []BjSeatInfo{
+			{Name: "Alice", Online: true, IsHost: true, Status: bj.StatusDealer, Chips: 120},
+			{Name: "Bob", Online: true, Status: bj.StatusOut, Chips: 0},
+			{Name: "Cara", Online: true, Status: bj.StatusWaiting, Chips: 80,
+				Cards: bjHand(t, "10", "9"), Score: 19, Bet: 5},
+		},
+		Dealer: BjDealerInfo{Up: bjHand(t, "6"), Hidden: 1, Score: 6, IsSeat: true, Seat: 0, NeedBet: 3},
+	}
+	out := (&bjModel{frame: f}).View()
+
+	for _, want := range []string{"轮流坐庄", "[庄]", "[出局]", "庄家(座位0)", "坐庄", "本局你坐庄"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("轮庄界面缺少 %q\n%s", want, out)
+		}
+	}
+	// 坐庄那局不该给出牌命令
+	if strings.Contains(out, "hit（要牌）") {
+		t.Fatalf("坐庄时不该提示 hit\n%s", out)
+	}
+
+	// 出局的人看到的是出局提示
+	f.You = 1
+	out = (&bjModel{frame: f}).View()
+	if !strings.Contains(out, "你已出局") {
+		t.Fatalf("出局的人应当看到提示\n%s", out)
+	}
+
+	// 整桌结束
+	f.Over = true
+	f.Winner = 2
+	out = (&bjModel{frame: f}).View()
+	if !strings.Contains(out, "整桌结束") || !strings.Contains(out, "Cara") {
+		t.Fatalf("整桌结束提示不对\n%s", out)
+	}
+}
+
+// TestBjSettleShowsDealerDelta 轮庄结算里要能看到庄家自己的收付。
+func TestBjSettleShowsDealerDelta(t *testing.T) {
+	f := bjBaseFrame(t)
+	f.Mode = bj.DealerRotate
+	f.Phase = bj.PhaseSettle
+	f.Turn = -1
+	f.Seats[0].Status = bj.StatusDealer
+	f.Seats[1].Bet = 20
+	f.Seats[2].Bet = 10
+	f.Results = []bj.Result{
+		{Seat: 1, Delta: -20, Chips: 80, Reason: "15 点小于庄家 18 点"},
+		{Seat: 2, Delta: -10, Chips: 90, Reason: "爆牌（22 点）"},
+	}
+	f.Dealer = BjDealerInfo{Up: bjHand(t, "10", "8"), Score: 18, Final: true, IsSeat: true, Seat: 0, Delta: 30}
+
+	out := (&bjModel{frame: f}).View()
+	for _, want := range []string{"本局结算", "庄家 座位0", "+30", "坐庄收付"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("轮庄结算缺少 %q\n%s", want, out)
+		}
 	}
 }
 
