@@ -113,8 +113,53 @@ func main() {
 			fmt.Println("Usage: intranet-play bj <host|join>")
 			os.Exit(1)
 		}
+	case "zjh":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: intranet-play zjh <host|join>")
+			os.Exit(1)
+		}
+		switch os.Args[2] {
+		case "host":
+			fs := flag.NewFlagSet("zjh host", flag.ExitOnError)
+			port := fs.Int("port", 9988, "port to listen on")
+			name := fs.String("name", "Player 1", "name to use for the game")
+			chips := fs.Int("chips", 100, "starting chips per player")
+			ante := fs.Int("ante", 1, "ante per hand")
+			maxStake := fs.Int("maxstake", 20, "max stake per hand")
+			maxRounds := fs.Int("maxrounds", 6, "max betting rounds before you must compare or fold")
+			seats := fs.Int("seats", 4, "max players at the table (2-6)")
+			_ = fs.Parse(os.Args[3:])
+			if err := room.RunZjhHost(*name, *port, *chips, *ante, *maxStake, *maxRounds, *seats); err != nil {
+				log.Fatal(err)
+			}
+		case "join":
+			fs := flag.NewFlagSet("zjh join", flag.ExitOnError)
+			addr := fs.String("addr", "127.0.0.1:9988", "address to connect to")
+			name := fs.String("name", "Player 2", "name to use for the game")
+			_ = fs.Parse(os.Args[3:])
+			if err := room.RunZjhClient(*name, *addr); err != nil {
+				log.Fatal(err)
+			}
+		case "help":
+			fmt.Println("Usage: intranet-play zjh <host|join>")
+			fmt.Println("Options:")
+			fmt.Println("  host -port int       port to listen on (default 9988)")
+			fmt.Println("  host -name string    name to use for the game (default Player 1)")
+			fmt.Println("  host -chips int      starting chips per player (default 100)")
+			fmt.Println("  host -ante int       ante per hand (default 1)")
+			fmt.Println("  host -maxstake int   max stake per hand (default 20)")
+			fmt.Println("  host -maxrounds int  betting rounds before you must compare/fold (default 6)")
+			fmt.Println("  host -seats int      max players at the table, 2-6 (default 4)")
+			fmt.Println("  join -addr string    address to connect to (default 127.0.0.1:9988)")
+			fmt.Println("  join -name string    name to use for the game (default Player 2)")
+			fmt.Println("提示: 炸金花看牌才知道自己的牌；闷牌跟注半价、平局占优；人齐后房主输入 start")
+			os.Exit(1)
+		default:
+			fmt.Println("Usage: intranet-play zjh <host|join>")
+			os.Exit(1)
+		}
 	case "help":
-		fmt.Println("Usage: intranet-play <host|join|ddz|bj>")
+		fmt.Println("Usage: intranet-play <host|join|ddz|bj|zjh>")
 		fmt.Println("Options:")
 		fmt.Println("  host -port int       port to listen on (default 9988)")
 		fmt.Println("  host -name string    name to use for the game (default Player 1)")
@@ -122,10 +167,11 @@ func main() {
 		fmt.Println("  join -addr string    address to connect to (default 127.0.0.1:9988)")
 		fmt.Println("  join -name string    name to use for the game (default Player 2)")
 		fmt.Println("  ddz <host|join>      3 人斗地主（3 人局，房主占一个座位）")
-		fmt.Println("  bj <host|join>       21 点（2-6 人，大家一起对虚拟庄家）")
+		fmt.Println("  bj <host|join>       21 点（2-6 人，3 人以上轮流坐庄）")
+		fmt.Println("  zjh <host|join>      炸金花（2-6 人，闷牌/看牌/比牌）")
 		os.Exit(1)
 	default:
-		fmt.Println("Usage: intranet-play <host|join|ddz|bj>")
+		fmt.Println("Usage: intranet-play <host|join|ddz|bj|zjh>")
 		os.Exit(1)
 	}
 }

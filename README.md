@@ -7,6 +7,7 @@
 | 五子棋 | 2 人 | `intranet-play host` / `intranet-play join` |
 | 斗地主 | 3 人 | `intranet-play ddz host` / `intranet-play ddz join` |
 | 21 点 | 2~6 人 | `intranet-play bj host` / `intranet-play bj join` |
+| 炸金花 | 2~6 人 | `intranet-play zjh host` / `intranet-play zjh join` |
 
 UI 刻意做成"数据面板"的样子（`nx-sync`），在工位上不显眼。
 
@@ -126,6 +127,41 @@ log: 可以压过顺子(7): 单张(T) play T | 对子(5) play 55 | 炸弹(2) pla
 
 界面里座位行会标 `[庄]`（本局坐庄）和 `[出局]`；坐庄那局不会给你出牌命令，看别人打就行。
 
+### 炸金花（2~6 人）
+
+```powershell
+# 房主（也是玩家）
+.\intranet-play.exe zjh host -port 9988 -name Alice -chips 100 -ante 1 -maxstake 20
+
+# 其他人
+.\intranet-play.exe zjh join -addr 192.168.1.23:9988 -name Bob
+.\intranet-play.exe zjh join -addr 192.168.1.23:9988 -name Cara
+```
+
+人齐后房主输入 `start`。每人 3 张牌，**开局你看不到自己的牌**，要看就得 `look`。
+
+| 命令 | 作用 |
+|---|---|
+| `look` / `看牌` | 看自己的牌（免费，随时可用；看完变"明牌"） |
+| `call` / `跟` | 跟注：明牌付 `注额`，闷牌付一半（最低 1） |
+| `raise 6` / `加 6` | 加注到 6（要高于当前注额、不超过上限），按新注额付钱 |
+| `fold` / `弃` | 弃牌（本局已投入的不退） |
+| `compare 1` / `比 1` | 花一份跟注跟座位 1 比牌，输的人出局 |
+| `next` | 结算后开下一局 |
+| `start` / `restart` | 房主开局 / 重开一桌 |
+
+规则要点：
+
+- 牌型从大到小：**豹子 > 同花顺 > 金花 > 顺子 > 对子 > 散牌**；**花色不参与比较**
+- `A23` 是最小的顺子（按"3 最大"算），`QKA` 最大，`AK2` 不算顺子
+- **闷牌半价**：没看牌时跟注/比牌只付一半，所以"闷着打"更省筹码
+- **闷牌平局占优**：比牌时两张牌完全一样大 → 恰好一方闷牌则闷牌方赢；都明或都闷则**主动比牌的一方输**
+- **比牌的牌面只有你们俩看到**，其他人只看到谁出局
+- 一圈 = 所有在局玩家各行动一次；到 `-maxrounds`（默认 6）之后**只能比牌或弃牌**，防止全闷无限跟
+- 注额到 `-maxstake`（默认 20）之后不能再加注；筹码不够付跟注只能弃牌
+- 筹码输光即出局；只剩一人有筹码时整桌结束，房主 `restart` 重开
+- 对局中有人掉线，本局作废回大厅（他的牌是暗的，别人没法替他决策）
+
 ---
 
 ## 连不上怎么办
@@ -149,23 +185,25 @@ go build ./cmd/intranet-play
 目录结构：
 
 ```text
-cmd/intranet-play/      命令行入口（host / join / ddz / bj）
-internal/protocol/      一行一条 JSON 的消息定义（五子棋 + DDZ_* + BJ_*）
+cmd/intranet-play/      命令行入口（host / join / ddz / bj / zjh）
+internal/protocol/      一行一条 JSON 的消息定义（五子棋 + DDZ_* + BJ_* + ZJH_*）
 internal/netx/          TCP 连接封装（inbox channel + 写锁）
 internal/game/          五子棋棋盘引擎
 internal/ddz/           斗地主规则引擎（牌型判定、比较、对局状态机）
 internal/bj/            21 点规则引擎（点数、要牌/停牌/双倍、庄家、筹码结算）
-internal/room/          房间编排：五子棋 2 人；ddz_* 3 人斗地主；bj_* 2~6 人 21 点
-internal/ui/            终端界面（bubbletea）：tui.go 五子棋，ddz.go 斗地主，bj.go 21 点
+internal/zjh/           炸金花规则引擎（三张牌牌型、底注/跟注/加注/看牌/比牌、奖池）
+internal/room/          房间编排：五子棋 2 人；ddz_* 3 人；bj_* / zjh_* 2~6 人
+internal/ui/            终端界面（bubbletea）：tui.go / ddz.go / bj.go / zjh.go
 docs/开发计划.md          五子棋开发计划
 docs/斗地主开发计划.md     斗地主开发计划与实施进度
-docs/21点开发计划.md       21 点开发计划
+docs/21点开发计划.md       21 点开发计划与实施进度
+docs/炸金花开发计划.md     炸金花开发计划
 ```
 
 设计约定：
 
 - **权威只在房主**：客户端只发命令、只渲染收到的视图，绝不本地推演
-- **手牌只单播**：斗地主里公共状态只有张数，手牌明文只发给本人；21 点更简单——闲家牌本来就是明牌，庄家暗牌只要"不下发"就够了
+- **手牌按需单播**：斗地主发牌即单播手牌；炸金花**看牌之后才下发**，没看牌时连自己的牌都不在报文里
 - **出牌用 cardID**：客户端上报的是牌 ID，房主校验归属，无法伪造
-- **隐藏信息要有测试兜着**：斗地主的公共视图、21 点的公共报文都各有一条"序列化后数牌数"的断言
+- **隐藏信息要有测试兜着**：斗地主的公共视图、21 点的公共报文、炸金花的公共报文与手牌时机都各有一条断言
 - **协议向后兼容**：未知 `type` 一律忽略，方便以后加字段
