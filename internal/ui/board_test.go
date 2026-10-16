@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"intranet-play/internal/game"
 	"github.com/mattn/go-runewidth"
+	"intranet-play/internal/game"
 )
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
