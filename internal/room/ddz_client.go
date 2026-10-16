@@ -293,6 +293,10 @@ func (r *ddzRoom) handleClientLocal(line string, conn *netx.Conn, name string) (
 		}
 
 	case "chat":
+		// 聊天不做服务端回声（房主只转发给别人，免得发送方看到两条），
+		// 所以这里必须自己记一条，否则说话的人看不到自己说了什么。
+		r.logf("我: %s", cmd.text)
+		r.render()
 		env, err := protocol.NewEnvelope(protocol.TypeChat, name, protocol.ChatPayload{Message: cmd.text})
 		if err == nil {
 			_ = conn.Send(env)
