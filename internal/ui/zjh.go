@@ -15,9 +15,9 @@ import (
 // 炸金花界面样式：与全局一致，只有"默认 / 暗灰 / 加粗"，不用彩色。
 var (
 	zjhBlindStyle = mutedStyle
-	zjhWinStyle   = boldStyle
-	zjhLoseStyle  = mutedStyle
-	zjhWarnStyle  = boldStyle
+	zjhWinStyle   = okStyle
+	zjhLoseStyle  = errStyle
+	zjhWarnStyle  = warnStyle
 )
 
 const zjhMaxLogLines = 5
@@ -196,16 +196,21 @@ func (m *zjhModel) View() string {
 	b.WriteString(zjhTableLine(f))
 	b.WriteByte('\n')
 	if f.PeekText != "" {
-		b.WriteString(Bullet(zjhWarnStyle.Render("peek: " + f.PeekText)))
+		// 比牌结果按输赢上色：赢了绿、输了红
+		peekStyle := okStyle
+		if strings.Contains(f.PeekText, "你输") {
+			peekStyle = errStyle
+		}
+		b.WriteString(Bullet(peekStyle.Render("peek: " + f.PeekText)))
 		b.WriteByte('\n')
 	}
 	if f.Phase == zjh.PhaseSettle && len(f.Results) > 0 {
 		b.WriteString(zjhSettleBlock(f))
 	}
-	b.WriteString(Bullet(statusStyle.Render(zjhStatusText(f))))
+	b.WriteString(TurnBullet(zjhMyTurn(f), zjhStatusText(f)))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, zjhMaxLogLines) {
-		b.WriteString(Bullet(ddzLogStyle.Render(line)))
+		b.WriteString(LogLine(line))
 		b.WriteByte('\n')
 	}
 	b.WriteString(InputBox(m.input, 60))
@@ -320,7 +325,7 @@ func zjhMyCardsLine(f ZjhFrame) string {
 	if len(f.Cards) == 0 {
 		return headerStyle.Render("你的牌: ") + metaStyle.Render("（还没发牌）")
 	}
-	return headerStyle.Render("你的牌: ") + zjhCardsText(f.Cards) + "   " +
+	return headerStyle.Render("你的牌: ") + boldStyle.Render(zjhCardsText(f.Cards)) + "   " +
 		statusStyle.Render(f.HandLabel)
 }
 
@@ -345,7 +350,7 @@ func zjhTableLine(f ZjhFrame) string {
 
 func zjhSettleBlock(f ZjhFrame) string {
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("---- 本局结算 ----  "))
+	b.WriteString(Section("本局结算", 56))
 	if f.Winner >= 0 {
 		b.WriteString(statusStyle.Render(fmt.Sprintf("%s 赢下奖池", f.seatName(f.Winner))))
 	}
@@ -439,4 +444,13 @@ func zjhHelpLine(f ZjhFrame) string {
 		return base
 	}
 	return "cmd: help | leave"
+}
+
+// zjhMyTurn 判断现在是不是轮到我行动，状态行据此标绿。
+func zjhMyTurn(f ZjhFrame) bool {
+	if !f.Started || f.Over || f.Phase != zjh.PhaseBetting || f.Turn != f.You {
+		return false
+	}
+	s := f.seat(f.You)
+	return s != nil && s.Status == zjh.StatusPlaying
 }

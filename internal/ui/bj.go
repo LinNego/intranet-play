@@ -14,9 +14,9 @@ import (
 
 // 21 点界面样式：与全局一致，只有"默认 / 暗灰 / 加粗"，不用彩色。
 var (
-	bjWinStyle  = boldStyle
-	bjLoseStyle = mutedStyle
-	bjPushStyle = hintStyle
+	bjWinStyle  = okStyle
+	bjLoseStyle = errStyle
+	bjPushStyle = mutedStyle
 )
 
 const bjMaxLogLines = 5
@@ -204,10 +204,10 @@ func (m *bjModel) View() string {
 	if f.Phase == bj.PhaseSettle {
 		b.WriteString(bjSettleBlock(f))
 	}
-	b.WriteString(Bullet(statusStyle.Render("state: " + bjStatusText(f))))
+	b.WriteString(TurnBullet(bjMyTurn(f), "state: "+bjStatusText(f)))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, bjMaxLogLines) {
-		b.WriteString(Bullet(ddzLogStyle.Render(line)))
+		b.WriteString(LogLine(line))
 		b.WriteByte('\n')
 	}
 	b.WriteString(InputBox(m.input, 60))
@@ -370,7 +370,7 @@ func bjYourHandLine(f BjFrame) string {
 	if s == nil || len(s.Cards) == 0 {
 		return headerStyle.Render("你:   ") + metaStyle.Render("（还没有牌）")
 	}
-	return headerStyle.Render("你:   ") + bjCardsText(s.Cards) + "   " + statusStyle.Render(bj.Describe(s.Cards))
+	return headerStyle.Render("你:   ") + boldStyle.Render(bjCardsText(s.Cards)) + "   " + statusStyle.Render(bj.Describe(s.Cards))
 }
 
 func bjOthersLine(f BjFrame) string {
@@ -389,7 +389,7 @@ func bjOthersLine(f BjFrame) string {
 
 func bjSettleBlock(f BjFrame) string {
 	var b strings.Builder
-	b.WriteString(headerStyle.Render("---- 本局结算 ----  "))
+	b.WriteString(Section("本局结算", 56))
 	if f.Dealer.Final {
 		b.WriteString(metaStyle.Render("庄家 " + bjCardsText(f.Dealer.Up)))
 	}
@@ -499,4 +499,15 @@ func bjHelpLine(f BjFrame) string {
 		return "cmd: hit（要牌）| stand（停牌）| double（双倍）| help | leave"
 	}
 	return "cmd: help | leave"
+}
+
+// bjMyTurn 判断现在是不是"该我动"：下注阶段还没下注，或者行动阶段轮到我。
+func bjMyTurn(f BjFrame) bool {
+	if !f.Started || f.Over {
+		return false
+	}
+	if s := f.seat(f.You); s != nil && f.Phase == bj.PhaseBetting && s.Status == bj.StatusIdle {
+		return true
+	}
+	return f.Phase == bj.PhasePlaying && f.Turn == f.You
 }

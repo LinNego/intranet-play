@@ -171,10 +171,10 @@ func (m model) View() string {
 		b.WriteString(renderBoard(f.Board))
 	}
 
-	b.WriteString(Bullet(statusStyle.Render(statusText(f))))
+	b.WriteString(TurnBullet(isMyTurnGomoku(f), statusText(f)))
 	b.WriteByte('\n')
 	if msg := strings.TrimSpace(f.LastMsg); msg != "" {
-		b.WriteString(Bullet(msgStyle.Render(msg)))
+		b.WriteString(LogLine(msg))
 		b.WriteByte('\n')
 	}
 
@@ -276,4 +276,9 @@ func padRight(s string, width int) string {
 		return runewidth.Truncate(s, width, "")
 	}
 	return s + strings.Repeat(" ", width-w)
+}
+
+// isMyTurnGomoku 判断现在是不是轮到本地下子（状态行据此标绿）。
+func isMyTurnGomoku(f Frame) bool {
+	return f.Status == game.GameStatusContinue && f.Turn == f.You
 }

@@ -205,10 +205,10 @@ func (m *ddzModel) View() string {
 	if f.Phase == ddz.PhaseRoundEnd {
 		b.WriteString(ddzRevealBlock(f))
 	}
-	b.WriteString(Bullet(statusStyle.Render("state: " + ddzStatusText(f))))
+	b.WriteString(TurnBullet(ddzMyTurn(f), "state: "+ddzStatusText(f)))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, ddzMaxLogLines) {
-		b.WriteString(Bullet(ddzLogStyle.Render(line)))
+		b.WriteString(LogLine(line))
 		b.WriteByte('\n')
 	}
 	b.WriteString(InputBox(m.input, 60))
@@ -368,7 +368,7 @@ func ddzRevealBlock(f DdzFrame) string {
 		}
 		result = fmt.Sprintf("%s获胜（座位 %d 出完）", side, f.Winner)
 	}
-	b.WriteString(headerStyle.Render("---- 本局结算 ----  "))
+	b.WriteString(Section("本局结算", 56))
 	b.WriteString(statusStyle.Render(result))
 	b.WriteByte('\n')
 	for seat := 0; seat < ddz.Seats; seat++ {
@@ -387,9 +387,12 @@ func ddzRevealBlock(f DdzFrame) string {
 	for seat := 0; seat < ddz.Seats; seat++ {
 		parts = append(parts, fmt.Sprintf("%d:%+d(总%+d)", seat, f.RoundScore[seat], f.Scores[seat]))
 	}
-	style := statusStyle
-	if f.RoundScore[f.You] < 0 {
-		style = ddzWarnStyle
+	style := mutedStyle
+	switch {
+	case f.RoundScore[f.You] > 0:
+		style = okStyle
+	case f.RoundScore[f.You] < 0:
+		style = errStyle
 	}
 	b.WriteString(style.Render("  得分变化 " + strings.Join(parts, "  ")))
 	b.WriteByte('\n')
@@ -463,4 +466,12 @@ func tail(lines []string, n int) []string {
 		return lines
 	}
 	return lines[len(lines)-n:]
+}
+
+// ddzMyTurn 判断现在是不是轮到我（叫分或出牌），状态行据此标绿。
+func ddzMyTurn(f DdzFrame) bool {
+	if !f.Started || f.Turn != f.You {
+		return false
+	}
+	return f.Phase == ddz.PhaseBidding || f.Phase == ddz.PhasePlaying
 }
