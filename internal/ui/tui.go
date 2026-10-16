@@ -7,7 +7,6 @@ import (
 	"intranet-play/internal/game"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -15,18 +14,20 @@ import (
 const cellW = 2
 const gutterW = 3 // row label + gap before matrix
 
+// 全局样式：刻意压成"默认 / 暗灰 / 加粗"三档，没有任何彩色。
+// 这是个摸鱼工具——屏幕上一眼看过去要像在跑工具、看日志，而不是在打牌。
 var (
-	titleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	metaStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
-	msgStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
-	inputStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	p1Style     = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	p2Style     = lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
-	winStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
-	emptyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	titleStyle  = plainStyle
+	metaStyle   = mutedStyle
+	statusStyle = plainStyle
+	msgStyle    = hintStyle
+	helpStyle   = hintStyle
+	inputStyle  = plainStyle
+	headerStyle = faintStyle
+	p1Style     = plainStyle
+	p2Style     = mutedStyle
+	winStyle    = boldStyle
+	emptyStyle  = faintStyle
 )
 
 // Frame is one full UI snapshot.
@@ -145,9 +146,6 @@ func (m model) View() string {
 	var b strings.Builder
 	f := m.frame
 
-	b.WriteString(titleStyle.Render("nx-sync 0.1  |  peer matrix"))
-	b.WriteByte('\n')
-
 	localTag, peerTag := "t1", "t2"
 	if f.You == 2 {
 		localTag, peerTag = "t2", "t1"
@@ -159,8 +157,11 @@ func (m model) View() string {
 	if oppName == "" {
 		oppName = "-"
 	}
-	b.WriteString(metaStyle.Render(fmt.Sprintf("local=%s/%s  peer=%s/%s  n=%d",
-		youName, localTag, oppName, peerTag, boardSize(f.Board))))
+	b.WriteString(LogoBlock(
+		"nx-sync 0.1  |  peer matrix",
+		fmt.Sprintf("local=%s/%s  peer=%s/%s  n=%d", youName, localTag, oppName, peerTag, boardSize(f.Board)),
+		"五子棋 · 2 人 · 输入 x,y 落子",
+	))
 	b.WriteByte('\n')
 
 	if f.Board == nil || f.Board.Size == 0 {
@@ -170,16 +171,16 @@ func (m model) View() string {
 		b.WriteString(renderBoard(f.Board))
 	}
 
-	b.WriteString(statusStyle.Render(statusText(f)))
+	b.WriteString(Bullet(statusStyle.Render(statusText(f))))
 	b.WriteByte('\n')
 	if msg := strings.TrimSpace(f.LastMsg); msg != "" {
-		b.WriteString(msgStyle.Render("log: " + msg))
+		b.WriteString(Bullet(msgStyle.Render(msg)))
 		b.WriteByte('\n')
 	}
 
-	b.WriteString(helpStyle.Render("cmd: x,y | chat TEXT | resign | restart | leave"))
+	b.WriteString(InputBox(m.input, 60))
 	b.WriteByte('\n')
-	b.WriteString(inputStyle.Render("$ " + m.input + "_"))
+	b.WriteString(Footer("? cmd: x,y | chat TEXT | resign | restart | leave"))
 	return b.String()
 }
 

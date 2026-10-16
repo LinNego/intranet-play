@@ -3,3 +3,5 @@ intranet-play.exe
 .idea/
 .vscode/
 .gocache/
+intranet-play-linux*
+intranet-play-darwin*

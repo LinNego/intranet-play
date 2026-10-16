@@ -8,19 +8,19 @@ import (
 	"intranet-play/internal/ddz"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
-// 斗地主界面使用的样式。沿用五子棋那套"像数据面板"的配色，只补牌面颜色。
+// 牌面一律用默认色，只靠字形区分：花色不染色，王与当前回合用加粗。
+// 刻意这么做——挡住屏幕时它得像个日志面板，而不是像在打牌。
 var (
-	ddzRedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	ddzBlackStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	ddzJokerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
-	ddzTurnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Bold(true)
-	ddzLandlordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("180"))
-	ddzLogStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	ddzWarnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("209"))
+	ddzRedStyle      = plainStyle
+	ddzBlackStyle    = plainStyle
+	ddzJokerStyle    = boldStyle
+	ddzTurnStyle     = boldStyle
+	ddzLandlordStyle = mutedStyle
+	ddzLogStyle      = hintStyle
+	ddzWarnStyle     = boldStyle
 )
 
 const (
@@ -190,28 +190,30 @@ func (m *ddzModel) View() string {
 	var b strings.Builder
 	f := m.frame
 
-	b.WriteString(titleStyle.Render("nx-sync 0.2  |  peer table"))
-	b.WriteByte('\n')
-	b.WriteString(metaStyle.Render(ddzMetaLine(f)))
+	b.WriteString(LogoBlock(
+		"nx-sync 0.2  |  peer table",
+		ddzMetaLine(f),
+		"斗地主 · 3 人 · 出牌写法 play 55 / play 34567 / play #3 #7",
+	))
 	b.WriteByte('\n')
 	b.WriteString(ddzSeatLine(f))
 	b.WriteByte('\n')
 	b.WriteString(ddzTableBlock(f))
-	b.WriteString(strings.Repeat("-", 56))
+	b.WriteString(Rule(56))
 	b.WriteByte('\n')
 	b.WriteString(ddzHandBlock(f))
 	if f.Phase == ddz.PhaseRoundEnd {
 		b.WriteString(ddzRevealBlock(f))
 	}
-	b.WriteString(statusStyle.Render("state: " + ddzStatusText(f)))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("cmd: play 55 | play 34567 | play #1 #2 | bid 0-3 | pass | hint | chat | leave"))
+	b.WriteString(Bullet(statusStyle.Render("state: " + ddzStatusText(f))))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, ddzMaxLogLines) {
-		b.WriteString(ddzLogStyle.Render("log: " + line))
+		b.WriteString(Bullet(ddzLogStyle.Render(line)))
 		b.WriteByte('\n')
 	}
-	b.WriteString(inputStyle.Render("$ " + m.input + "_"))
+	b.WriteString(InputBox(m.input, 60))
+	b.WriteByte('\n')
+	b.WriteString(Footer("? cmd: play 55 | play 34567 | play #1 #2 | bid 0-3 | pass | hint | chat | leave"))
 	return b.String()
 }
 

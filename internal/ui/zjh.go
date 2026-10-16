@@ -12,13 +12,12 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// 炸金花界面样式（牌面颜色沿用斗地主那套 ddzCardText）。
+// 炸金花界面样式：与全局一致，只有"默认 / 暗灰 / 加粗"，不用彩色。
 var (
-	zjhPotStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("180"))
-	zjhBlindStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	zjhWinStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("150"))
-	zjhLoseStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("209"))
-	zjhWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	zjhBlindStyle = mutedStyle
+	zjhWinStyle   = boldStyle
+	zjhLoseStyle  = mutedStyle
+	zjhWarnStyle  = boldStyle
 )
 
 const zjhMaxLogLines = 5
@@ -182,35 +181,46 @@ func (m *zjhModel) View() string {
 	var b strings.Builder
 	f := m.frame
 
-	b.WriteString(titleStyle.Render("nx-sync 0.4  |  peer table"))
-	b.WriteByte('\n')
-	b.WriteString(metaStyle.Render(zjhMetaLine(f)))
+	b.WriteString(LogoBlock(
+		"nx-sync 0.4  |  peer table",
+		zjhMetaLine(f),
+		zjhTagline(f),
+	))
 	b.WriteByte('\n')
 	b.WriteString(zjhSeatLine(f))
 	b.WriteByte('\n')
-	b.WriteString(strings.Repeat("-", 56))
+	b.WriteString(Rule(56))
 	b.WriteByte('\n')
 	b.WriteString(zjhMyCardsLine(f))
 	b.WriteByte('\n')
 	b.WriteString(zjhTableLine(f))
 	b.WriteByte('\n')
 	if f.PeekText != "" {
-		b.WriteString(zjhWarnStyle.Render("peek: " + f.PeekText))
+		b.WriteString(Bullet(zjhWarnStyle.Render("peek: " + f.PeekText)))
 		b.WriteByte('\n')
 	}
 	if f.Phase == zjh.PhaseSettle && len(f.Results) > 0 {
 		b.WriteString(zjhSettleBlock(f))
 	}
-	b.WriteString(statusStyle.Render("state: " + zjhStatusText(f)))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render(zjhHelpLine(f)))
+	b.WriteString(Bullet(statusStyle.Render(zjhStatusText(f))))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, zjhMaxLogLines) {
-		b.WriteString(ddzLogStyle.Render("log: " + line))
+		b.WriteString(Bullet(ddzLogStyle.Render(line)))
 		b.WriteByte('\n')
 	}
-	b.WriteString(inputStyle.Render("$ " + m.input + "_"))
+	b.WriteString(InputBox(m.input, 60))
+	b.WriteByte('\n')
+	b.WriteString(Footer("? " + zjhHelpLine(f)))
 	return b.String()
+}
+
+// zjhTagline 是抬头第三行：这桌在玩什么、有什么规矩。
+func zjhTagline(f ZjhFrame) string {
+	people := len(f.Seats)
+	if people == 0 {
+		return "炸金花 · 等开局"
+	}
+	return fmt.Sprintf("炸金花 · %d 人 · 闷牌半价、闷牌平局占优", people)
 }
 
 func (f ZjhFrame) seat(seat int) *ZjhSeatInfo {

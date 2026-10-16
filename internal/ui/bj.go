@@ -12,11 +12,11 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// 21 点界面样式。牌面颜色沿用斗地主那套（同一个包里的 ddzCardText）。
+// 21 点界面样式：与全局一致，只有"默认 / 暗灰 / 加粗"，不用彩色。
 var (
-	bjWinStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("150"))
-	bjLoseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("209"))
-	bjPushStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	bjWinStyle  = boldStyle
+	bjLoseStyle = mutedStyle
+	bjPushStyle = hintStyle
 )
 
 const bjMaxLogLines = 5
@@ -185,13 +185,15 @@ func (m *bjModel) View() string {
 	var b strings.Builder
 	f := m.frame
 
-	b.WriteString(titleStyle.Render("nx-sync 0.3  |  peer table"))
-	b.WriteByte('\n')
-	b.WriteString(metaStyle.Render(bjMetaLine(f)))
+	b.WriteString(LogoBlock(
+		"nx-sync 0.3  |  peer table",
+		bjMetaLine(f),
+		bjTagline(f),
+	))
 	b.WriteByte('\n')
 	b.WriteString(bjSeatLine(f))
 	b.WriteByte('\n')
-	b.WriteString(strings.Repeat("-", 56))
+	b.WriteString(Rule(56))
 	b.WriteByte('\n')
 	b.WriteString(bjDealerLine(f))
 	b.WriteByte('\n')
@@ -202,16 +204,28 @@ func (m *bjModel) View() string {
 	if f.Phase == bj.PhaseSettle {
 		b.WriteString(bjSettleBlock(f))
 	}
-	b.WriteString(statusStyle.Render("state: " + bjStatusText(f)))
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render(bjHelpLine(f)))
+	b.WriteString(Bullet(statusStyle.Render("state: " + bjStatusText(f))))
 	b.WriteByte('\n')
 	for _, line := range tail(f.Log, bjMaxLogLines) {
-		b.WriteString(ddzLogStyle.Render("log: " + line))
+		b.WriteString(Bullet(ddzLogStyle.Render(line)))
 		b.WriteByte('\n')
 	}
-	b.WriteString(inputStyle.Render("$ " + m.input + "_"))
+	b.WriteString(InputBox(m.input, 60))
+	b.WriteByte('\n')
+	b.WriteString(Footer("? " + bjHelpLine(f)))
 	return b.String()
+}
+
+// bjTagline 是抬头第三行：这桌在玩什么、庄家怎么定。
+func bjTagline(f BjFrame) string {
+	mode := "虚拟庄家"
+	if f.Mode == bj.DealerRotate {
+		mode = "轮流坐庄"
+	}
+	if !f.Started {
+		return "21 点 · 等开局"
+	}
+	return fmt.Sprintf("21 点 · %d 人 · %s · 庄家 %d 点停牌", len(f.Seats), mode, bj.DealerStand)
 }
 
 func (f BjFrame) seat(seat int) *BjSeatInfo {

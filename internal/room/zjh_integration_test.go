@@ -230,6 +230,7 @@ type zjhWireBot struct {
 	view     zjh.PublicView
 	problems []string
 	chips    map[int]int
+	pot      int
 	actions  int
 	key      string
 	peeks    int
@@ -301,6 +302,7 @@ func (b *zjhWireBot) run(conn *netx.Conn) {
 			for _, sv := range p.View.Seats {
 				b.chips[sv.Seat] = sv.Chips
 			}
+			b.pot = p.View.Pot
 			b.mu.Unlock()
 			b.act(conn)
 
@@ -411,7 +413,7 @@ func TestZjhMultiPlayerEndToEnd(t *testing.T) {
 	// 每个人都应当：收到过手牌报文、真的行动过、经过看牌
 	for _, b := range bots {
 		b.mu.Lock()
-		hands, actions, seat, name, peeks, chips := b.hands, b.actions, b.seat, b.name, b.peeks, b.chips
+		hands, actions, seat, name, chips, pot := b.hands, b.actions, b.seat, b.name, b.chips, b.pot
 		b.mu.Unlock()
 		if hands == 0 {
 			t.Fatalf("客户端 %s 一局手牌报文都没收到", name)
@@ -422,16 +424,15 @@ func TestZjhMultiPlayerEndToEnd(t *testing.T) {
 		if seat != 1 && seat != 2 {
 			t.Fatalf("客户端 %s 的座位 = %d, 期望 1 或 2", name, seat)
 		}
-		// 三家的筹码之和必须守恒（钱只在玩家之间流动）
-		total := 0
+		// 守恒量是"手里的 + 奖池里的"：下注中的筹码在奖池里，
+		// 只数手里的会在牌局中途对不上（这条断言一开始就是这么写错的）。
+		total := pot
 		for s := 0; s < 3; s++ {
 			total += chips[s]
 		}
 		if total != 300 {
-			t.Fatalf("筹码总额 = %d, 期望 300（不该凭空产生或消失）", total)
+			t.Fatalf("筹码总额（含奖池 %d）= %d, 期望 300（不该凭空产生或消失）", pot, total)
 		}
-		// 打了 2 局、每局最多剩 1 人，所以必然有人经历过比牌
-		_ = peeks
 	}
 }
 

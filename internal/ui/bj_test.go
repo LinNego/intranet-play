@@ -84,7 +84,7 @@ func TestBjViewRendersTable(t *testing.T) {
 		"hit",
 		"stand",
 		"double",
-		"log: Bob 下注 20",
+		"⏺ Bob 下注 20",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("界面缺少 %q\n%s", want, out)
@@ -136,8 +136,9 @@ func TestBjViewLobbyAndSettle(t *testing.T) {
 			t.Fatalf("结算界面缺少 %q\n%s", want, out)
 		}
 	}
-	// 结算后庄家应当翻开：不能再出现暗牌占位
-	if strings.Contains(out, "?") {
+	// 结算后庄家应当翻开：暗牌那句提示不该再出现
+	// （不能直接断言没有 "?"，因为页脚的帮助提示本来就以 ? 开头）
+	if strings.Contains(out, "暗牌未知") {
 		t.Fatalf("结算后庄家应当已翻开\n%s", out)
 	}
 }
